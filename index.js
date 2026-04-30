@@ -1,15 +1,18 @@
 const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys')
 const pino = require('pino')
 const fs = require('fs')
+const http = require('http')
 const { Boom } = require('@hapi/boom')
+const qrcode = require('qrcode-terminal')
 
 let config = JSON.parse(fs.readFileSync('./config.json'))
 const BOT_IMAGE = 'https://files.catbox.moe/bhiw6e.png'
 const VERSION = '1.2.0'
+const PORT = process.env.PORT || 3000
 
 let commands = new Map()
 
-// Load commands
+// Load all commands
 fs.readdirSync('./commands').forEach(file => {
     if (file.endsWith('.js')) {
         const cmd = require(`./commands/${file}`)
@@ -28,6 +31,12 @@ const uptime = () => {
     return `${h}h ${m}m ${s}s`
 }
 
+// Keep-alive server for Render - fixes "No open ports" error
+http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' })
+    res.end(`VOID-MD ${VERSION} Running 💀`)
+}).listen(PORT, () => console.log(`Server running on ${PORT}`))
+
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('session')
     const { version } = await fetchLatestBaileysVersion()
@@ -35,7 +44,6 @@ async function startBot() {
     const sock = makeWASocket({
         version,
         logger: pino({ level: 'silent' }),
-        printQRInTerminal: true,
         auth: state,
         browser: ['VOID-MD', 'Chrome', '1.2.0']
     })
@@ -43,9 +51,17 @@ async function startBot() {
     sock.ev.on('creds.update', saveCreds)
 
     sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect } = update
+        const { connection, lastDisconnect, qr } = update
+
+        // Manual QR print - fixes deprecated printQRInTerminal
+        if (qr) {
+            console.log('Scan QR Code below:')
+            qrcode.generate(qr, { small: true })
+        }
+
         if (connection === 'close') {
             const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode!== DisconnectReason.loggedOut
+            console.log('Connection closed, reconnecting:', shouldReconnect)
             if (shouldReconnect) startBot()
         } else if (connection === 'open') {
             // AUTO-SET OWNER TO SCANNED NUMBER 💀
@@ -57,7 +73,8 @@ async function startBot() {
                 saveConfig()
                 console.log(`Owner auto-set to: ${ownerNum} 💀`)
                 await sock.sendMessage(ownerJid, {
-                    text: `*VOID-MD ${VERSION} ACTIVATED* 💀\n\n*Owner:* @${ownerNum}\n*Prefix:* ${config.PREFIX}\n\nType ${config.PREFIX}menu to start`
+                    text: `*VOID-MD ${VERSION} ACTIVATED* 💀\n\n*Owner:* @${ownerNum}\n*Prefix:* ${config.PREFIX}\n*Commands:* ${commands.size}\n\nType ${config.PREFIX}menu to start`,
+                    mentions: [ownerJid]
                 })
             } else {
                 console.log('VOID-MD connected 💀')
@@ -102,17 +119,19 @@ async function startBot() {
             }
         }
 
-        // Autotyping/Autorecording
+        // Autotyping
         if (config.autotyping &&!isGroup) {
             await sock.sendPresenceUpdate('composing', from)
             setTimeout(() => sock.sendPresenceUpdate('paused', from), 3000)
         }
+
+        // Autorecording
         if (config.autorecording &&!isGroup) {
             await sock.sendPresenceUpdate('recording', from)
             setTimeout(() => sock.sendPresenceUpdate('paused', from), 3000)
         }
 
-        // Commands
+        // Execute commands
         if (isCmd) {
             const cmd = commands.get(command)
             if (!cmd) return
@@ -131,6 +150,7 @@ async function startBot() {
                     VERSION, uptime, BOT_IMAGE
                 })
             } catch (e) {
+                console.error('Command error:', e)
                 reply(`*Error:* ${e.message} 💀`)
             }
         }
@@ -141,14 +161,16 @@ async function startBot() {
         if (!config.antidelete) return
         for (const { key, update: msgUpdate } of update) {
             if (msgUpdate?.messageStubType === 1) {
-                const msg = await sock.loadMessage(key.remoteJid, key.id)
-                if (msg?.message) {
-                    const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '*Media deleted* 💀'
-                    await sock.sendMessage(key.remoteJid, {
-                        text: `*ANTIDELETE* 💀\n*From:* @${key.participant?.split('@')[0] || 'Unknown'}\n*Message:* ${text}`,
-                        mentions: [key.participant]
-                    })
-                }
+                try {
+                    const msg = await sock.loadMessage(key.remoteJid, key.id)
+                    if (msg?.message) {
+                        const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '*Media deleted* 💀'
+                        await sock.sendMessage(key.remoteJid, {
+                            text: `*ANTIDELETE* 💀\n*From:* @${key.participant?.split('@')[0] || 'Unknown'}\n*Message:* ${text}`,
+                            mentions: [key.participant]
+                        })
+                    }
+                } catch {}
             }
         }
     })
