@@ -1,6 +1,6 @@
 {
   "name": "void-md",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "VOID-MD WhatsApp Bot with toggles, downloaders, admin tools",
   "main": "index.js",
   "scripts": {
