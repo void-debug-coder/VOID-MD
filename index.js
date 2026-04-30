@@ -3,7 +3,7 @@ const pino = require('pino')
 const fs = require('fs')
 const http = require('http')
 const { Boom } = require('@hapi/boom')
-const qrcode = require('qrcode-terminal')
+const qrcode = require('qrcode')
 
 let config = JSON.parse(fs.readFileSync('./config.json'))
 const BOT_IMAGE = 'https://files.catbox.moe/bhiw6e.png'
@@ -11,6 +11,8 @@ const VERSION = '1.2.0'
 const PORT = process.env.PORT || 3000
 
 let commands = new Map()
+let currentQR = null
+let botStatus = 'Starting...'
 
 // Load all commands
 fs.readdirSync('./commands').forEach(file => {
@@ -31,11 +33,58 @@ const uptime = () => {
     return `${h}h ${m}m ${s}s`
 }
 
-// Keep-alive server for Render - fixes "No open ports" error
-http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' })
-    res.end(`VOID-MD ${VERSION} Running 💀`)
-}).listen(PORT, () => console.log(`Server running on ${PORT}`))
+// Web server to display QR
+const server = http.createServer(async (req, res) => {
+    if (req.url === '/') {
+        let html = `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>VOID-MD ${VERSION}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { 
+            background: #0a0a0a; 
+            color: #fff; 
+            font-family: monospace; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            min-height: 100vh; 
+            margin: 0; 
+            flex-direction: column;
+            text-align: center;
+        }
+       .container { padding: 20px; }
+        h1 { color: #00ff00; margin-bottom: 10px; }
+       .status { color: #888; margin-bottom: 20px; }
+        img { max-width: 300px; border: 2px solid #00ff00; border-radius: 10px; }
+       .connected { color: #00ff00; font-size: 20px; }
+       .info { margin-top: 20px; color: #666; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>💀 VOID-MD ${VERSION}</h1>
+        <div class="status">Status: ${botStatus}</div>
+        ${currentQR? 
+            `<img src="${currentQR}" alt="QR Code"><p>Scan with WhatsApp > Linked Devices</p>` : 
+            `<div class="connected">✅ Bot Connected</div><p>Owner: ${config.OWNER_NUMBER || 'Not set'}</p>`
+        }
+        <div class="info">
+            Commands: ${commands.size} | Prefix: ${config.PREFIX}<br>
+            Uptime: ${uptime()}
+        </div>
+    </div>
+    <script>setTimeout(() => location.reload(), 5000)</script>
+</body>
+</html>`
+        res.writeHead(200, { 'Content-Type': 'text/html' })
+        res.end(html)
+    }
+})
+
+server.listen(PORT, () => console.log(`Server running on ${PORT}`))
 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('session')
@@ -53,17 +102,23 @@ async function startBot() {
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update
 
-        // Manual QR print - fixes deprecated printQRInTerminal
+        // Generate QR for webpage
         if (qr) {
-            console.log('Scan QR Code below:')
-            qrcode.generate(qr, { small: true })
+            botStatus = 'Scan QR Code'
+            currentQR = await qrcode.toDataURL(qr)
+            console.log('QR Code updated - check webpage')
         }
 
         if (connection === 'close') {
+            botStatus = 'Disconnected'
+            currentQR = null
             const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode!== DisconnectReason.loggedOut
             console.log('Connection closed, reconnecting:', shouldReconnect)
             if (shouldReconnect) startBot()
         } else if (connection === 'open') {
+            botStatus = 'Connected'
+            currentQR = null
+            
             // AUTO-SET OWNER TO SCANNED NUMBER 💀
             const ownerJid = sock.user.id
             const ownerNum = ownerJid.split(':')[0]
@@ -99,16 +154,13 @@ async function startBot() {
         const quoted = m.message.extendedTextMessage?.contextInfo?.quotedMessage
         const mentioned = m.message.extendedTextMessage?.contextInfo?.mentionedJid || []
 
-        // Autoread
         if (config.autoread) await sock.readMessages([m.key])
 
-        // Autoview status
         if (from === 'status@broadcast' && config.autoview) {
             await sock.readMessages([m.key])
             try { await sock.sendMessage(from, { react: { text: '💀', key: m.key } }) } catch {}
         }
 
-        // Antilink
         if (isGroup && config.antilink && body.includes('chat.whatsapp.com/')) {
             const groupMetadata = await sock.groupMetadata(from)
             const botAdmin = groupMetadata.participants.find(p => p.id === sock.user.id.split(':')[0] + '@s.whatsapp.net')?.admin
@@ -119,24 +171,20 @@ async function startBot() {
             }
         }
 
-        // Autotyping
         if (config.autotyping &&!isGroup) {
             await sock.sendPresenceUpdate('composing', from)
             setTimeout(() => sock.sendPresenceUpdate('paused', from), 3000)
         }
 
-        // Autorecording
         if (config.autorecording &&!isGroup) {
             await sock.sendPresenceUpdate('recording', from)
             setTimeout(() => sock.sendPresenceUpdate('paused', from), 3000)
         }
 
-        // Execute commands
         if (isCmd) {
             const cmd = commands.get(command)
             if (!cmd) return
 
-            // Ban check
             const banned = JSON.parse(fs.readFileSync('./banned.json'))
             if (banned.includes(sender) &&!isOwner) return
 
@@ -156,7 +204,6 @@ async function startBot() {
         }
     })
 
-    // Antidelete
     sock.ev.on('messages.update', async (update) => {
         if (!config.antidelete) return
         for (const { key, update: msgUpdate } of update) {
