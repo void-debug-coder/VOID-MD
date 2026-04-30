@@ -7,7 +7,13 @@
     "start": "node index.js",
     "dev": "nodemon index.js"
   },
-  "keywords": ["whatsapp", "bot", "baileys", "md", "void"],
+  "keywords": [
+    "whatsapp",
+    "bot",
+    "baileys",
+    "md",
+    "void"
+  ],
   "author": "Mr Void",
   "license": "MIT",
   "dependencies": {
