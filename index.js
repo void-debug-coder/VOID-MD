@@ -3,16 +3,16 @@ const pino = require('pino')
 const fs = require('fs')
 const http = require('http')
 const path = require('path')
-const qrcode = require('qrcode')
 
 let config = JSON.parse(fs.readFileSync('./config.json'))
 const BOT_IMAGE = 'https://files.catbox.moe/bhiw6e.png'
-const VERSION = '1.2.2'
-const PORT = process.env.PORT || 3000
+const VERSION = '1.2.3'
+const PORT = process.env.PORT || 10000
+const PHONE_NUMBER = "254707866406" // YOUR NUMBER HERE
 
 let commands = new Map()
-let currentQR = null
 let botStatus = 'Starting...'
+let pairCode = null
 
 if (!fs.existsSync('./commands')) fs.mkdirSync('./commands')
 if (!fs.existsSync('./banned.json')) fs.writeFileSync('./banned.json', '[]')
@@ -24,10 +24,7 @@ console.log(`Loading ${commandFiles.length} command files...`)
 for (const file of commandFiles) {
     try {
         const cmd = require(`./commands/${file}`)
-        if (!cmd.name) {
-            console.log(`Skipped ${file}: missing name`)
-            continue
-        }
+        if (!cmd.name) continue
         commands.set(cmd.name, cmd)
         if (cmd.alias) cmd.alias.forEach(a => commands.set(a, cmd))
     } catch (e) {
@@ -68,20 +65,20 @@ const server = http.createServer(async (req, res) => {
             flex-direction: column;
             text-align: center;
         }
-     .container { padding: 20px; }
-        h1 { color: #00ff00; margin-bottom: 10px; }
-     .status { color: #888; margin-bottom: 20px; }
-        img { max-width: 300px; border: 2px solid #00ff00; border-radius: 10px; }
-     .connected { color: #00ff00; font-size: 20px; }
-     .info { margin-top: 20px; color: #666; font-size: 12px; }
+    .container { padding: 20px; }
+        h1 { color: #00ff00; margin-bottom: 10px; font-size: 24px; }
+    .status { color: #888; margin-bottom: 20px; }
+    .code { color: #00ff00; font-size: 32px; letter-spacing: 5px; border: 2px solid #00ff00; padding: 15px; border-radius: 10px; }
+    .connected { color: #00ff00; font-size: 20px; }
+    .info { margin-top: 20px; color: #666; font-size: 12px; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>VOID-MD ${VERSION}</h1>
         <div class="status">Status: ${botStatus}</div>
-        ${currentQR?
-            `<img src="${currentQR}" alt="QR Code"><p>Scan with WhatsApp > Linked Devices</p>` :
+        ${pairCode?
+            `<div class="code">${pairCode}</div><p>WhatsApp > Linked Devices > Link with phone number</p>` :
             `<div class="connected">Bot Connected</div><p>Owner: ${config.OWNER_NUMBER || 'Not set'}</p>`
         }
         <div class="info">
@@ -107,53 +104,56 @@ async function startBot() {
         version,
         logger: pino({ level: 'info' }),
         auth: state,
-        browser: ['VOID-MD', 'Chrome', '1.2.2']
+        printQRInTerminal: false,
+        browser: ['VOID-MD', 'Chrome', '1.2.3']
     })
 
     sock.ev.on('creds.update', saveCreds)
 
     sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect, qr } = update
+        const { connection, lastDisconnect } = update
 
-        if (qr) {
-            botStatus = 'Scan QR Code'
-            currentQR = await qrcode.toDataURL(qr)
-            console.log('QR Code updated')
+        if (connection === 'connecting') {
+            botStatus = 'Connecting...'
+            if (!state.creds.registered) {
+                setTimeout(async () => {
+                    try {
+                        pairCode = await sock.requestPairingCode(PHONE_NUMBER)
+                        botStatus = 'Waiting for pair code'
+                        console.log(`PAIR CODE: ${pairCode}`)
+                    } catch (e) {
+                        console.log('Pair code error:', e)
+                    }
+                }, 3000)
+            }
         }
 
         if (connection === 'close') {
             botStatus = 'Disconnected'
-            currentQR = null
-            const shouldReconnect = lastDisconnect?.error?.output?.statusCode!== DisconnectReason.loggedOut
-            console.log('Connection closed, reconnecting:', shouldReconnect)
+            pairCode = null
+            const statusCode = lastDisconnect?.error?.output?.statusCode
+            console.log('Connection closed with code:', statusCode)
+            const shouldReconnect = statusCode!== DisconnectReason.loggedOut
             if (shouldReconnect) startBot()
         } else if (connection === 'open') {
             botStatus = 'Connected'
-            currentQR = null
-            console.log('VOID-MD connected')
+            pairCode = null
+            console.log('VOID-MD CONNECTED - READY FOR COMMANDS')
 
             const ownerJid = sock.user.id
             const ownerNum = ownerJid.split(':')[0].split('@')[0]
-
-            if (config.OWNER_NUMBER!== ownerNum) {
-                config.OWNER_NUMBER = ownerNum
-                saveConfig()
-                console.log(`Owner auto-set to: ${ownerNum}`)
-                await sock.sendMessage(ownerJid, {
-                    text: `*VOID-MD ${VERSION} ACTIVATED*\n\n*Owner:* @${ownerNum}\n*Prefix:* ${config.PREFIX}\n*Commands:* ${commands.size}\n\nType ${config.PREFIX}menu to start`,
-                    mentions: [ownerJid]
-                })
-            }
-
-            if (config.autonline) sock.sendPresenceUpdate('available')
+            config.OWNER_NUMBER = ownerNum
+            saveConfig()
+            console.log(`Owner set to: ${ownerNum}`)
+            
+            await sock.sendMessage(ownerJid, { text: `VOID-MD ${VERSION} ONLINE\nSend.menu to test` })
         }
     })
 
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
-        console.log(`Message received: ${type}`)
+        console.log(`Message event: ${type}`)
         const m = messages[0]
-        if (!m.message) return
-        if (m.key.fromMe) return
+        if (!m.message || m.key.fromMe) return
 
         const from = m.key.remoteJid
         const isGroup = from.endsWith('@g.us')
@@ -165,22 +165,19 @@ async function startBot() {
         const command = isCmd? body.slice(config.PREFIX.length).trim().split(' ')[0].toLowerCase() : ''
         const args = body.trim().split(/ +/).slice(1)
 
-        if (isCmd) console.log(`[CMD] ${command} | From: ${senderNum} | Owner: ${isOwner} | Group: ${isGroup}`)
+        if (isCmd) console.log(`[CMD] ${command} | From: ${senderNum} | Owner: ${isOwner}`)
 
         if (config.autoread) await sock.readMessages([m.key])
 
         if (isCmd) {
             const cmd = commands.get(command)
             if (!cmd) {
-                console.log(`[CMD] Command not found: ${command}`)
+                console.log(`[CMD] Not found: ${command}`)
                 return
             }
 
             const banned = JSON.parse(fs.readFileSync('./banned.json'))
-            if (banned.includes(sender) &&!isOwner) {
-                console.log(`[CMD] Banned user: ${senderNum}`)
-                return
-            }
+            if (banned.includes(sender) &&!isOwner) return
 
             const reply = (text, opts = {}) => sock.sendMessage(from, { text,...opts }, { quoted: m })
 
@@ -195,8 +192,8 @@ async function startBot() {
                     VERSION, uptime, BOT_IMAGE
                 })
             } catch (e) {
-                console.error(`[CMD] Error in ${command}:`, e)
-                reply(`*Error:* ${e.message}`)
+                console.error(`[CMD] Error:`, e)
+                reply(`Error: ${e.message}`)
             }
         }
     })
