@@ -30,7 +30,7 @@ app.get('/', (req, res) => {
                 min-height: 100vh;
                 padding: 20px;
             }
-           .container { 
+          .container { 
                 max-width: 400px; 
                 width: 100%;
                 text-align: center;
@@ -40,7 +40,7 @@ app.get('/', (req, res) => {
                 border: 2px solid #8b5cf6;
                 box-shadow: 0 0 20px rgba(139, 92, 246, 0.3);
             }
-           .bot-avatar {
+          .bot-avatar {
                 width: 120px;
                 height: 120px;
                 border-radius: 50%;
@@ -50,16 +50,16 @@ app.get('/', (req, res) => {
                 box-shadow: 0 0 15px rgba(139, 92, 246, 0.5);
             }
             h1 { color: #8b5cf6; margin-bottom: 10px; font-size: 28px; }
-           .status { 
+          .status { 
                 padding: 12px; 
                 margin: 20px 0;
                 border-radius: 8px;
                 font-weight: bold;
                 font-size: 14px;
             }
-           .status.waiting { background: #f59e0b; color: #000; }
-           .status.connected { background: #10b981; color: #000; }
-           .status.error { background: #ef4444; }
+          .status.waiting { background: #f59e0b; color: #000; }
+          .status.connected { background: #10b981; color: #000; }
+          .status.error { background: #ef4444; }
             #qrcode { 
                 background: #fff; 
                 padding: 15px; 
@@ -70,10 +70,10 @@ app.get('/', (req, res) => {
                 min-width: 280px;
             }
             #qrcode img { display: block; width: 250px; height: 250px; }
-           .steps { text-align: left; margin-top: 20px; font-size: 13px; line-height: 1.8; color: #ccc; }
-           .steps b { color: #8b5cf6; }
-           .bot-num { color: #8b5cf6; font-size: 18px; margin-top: 10px; }
-           .loading { color: #000; padding: 100px 40px; font-weight: bold; }
+          .steps { text-align: left; margin-top: 20px; font-size: 13px; line-height: 1.8; color: #ccc; }
+          .steps b { color: #8b5cf6; }
+          .bot-num { color: #8b5cf6; font-size: 18px; margin-top: 10px; }
+          .loading { color: #000; padding: 100px 40px; font-weight: bold; }
         </style>
     </head>
     <body>
@@ -109,19 +109,26 @@ async function startBot() {
     console.log('Starting bot...')
     
     try {
-        await new Promise(r => setTimeout(r, 2000)) // Wait 2 sec before start 💀
+        // FORCE DELETE SESSION ON EVERY START - KILLS 405 💀
+        if (fs.existsSync('./session')) {
+            console.log('Deleting old session...')
+            fs.rmSync('./session', { recursive: true, force: true })
+        }
+        await new Promise(r => setTimeout(r, 1000))
+        fs.mkdirSync('./session')
         
-        if (!fs.existsSync('./session')) fs.mkdirSync('./session')
         const { state, saveCreds } = await useMultiFileAuthState('./session')
         
         const sock = makeWASocket({
             logger: pino({ level: 'silent' }),
             auth: state,
-            browser: Browsers.macOS('Desktop'), // Changed from ubuntu 💀
+            browser: Browsers.macOS('Desktop'),
             printQRInTerminal: false,
             version: [2, 3000, 1023223821],
             syncFullHistory: false,
-            markOnlineOnConnect: false
+            markOnlineOnConnect: false,
+            connectTimeoutMs: 60000,
+            keepAliveIntervalMs: 10000
         })
 
         sock.ev.on('creds.update', saveCreds)
@@ -133,7 +140,7 @@ async function startBot() {
                 botStatus = 'Scan QR to connect'
                 try {
                     qrCodeData = await QRCode.toDataURL(qr, { width: 250, margin: 1 })
-                    console.log('QR generated 💀')
+                    console.log('QR generated successfully 💀')
                 } catch (err) {
                     console.log('QR error:', err)
                     botStatus = 'QR Error. Retrying...'
@@ -146,18 +153,8 @@ async function startBot() {
                 qrCodeData = null
                 botNumber = null
                 isStarting = false
-                
-                if (code === DisconnectReason.loggedOut || code === 405 || code === 401) {
-                    botStatus = 'Session expired. Resetting...'
-                    if (fs.existsSync('./session')) {
-                        fs.rmSync('./session', { recursive: true, force: true })
-                    }
-                    await new Promise(r => setTimeout(r, 5000)) // Wait 5 sec before restart
-                } else {
-                    botStatus = 'Reconnecting...'
-                }
-                
-                setTimeout(startBot, 3000)
+                botStatus = 'Disconnected. Restarting...'
+                setTimeout(startBot, 5000)
             }
             
             if (connection === 'open') {
