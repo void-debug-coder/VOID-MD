@@ -7,9 +7,9 @@ const config = require('./config')
 
 const app = express()
 let qrCodeData = null
-let botStatus = 'Starting...'
+let botStatus = 'Initializing...'
 let botNumber = null
-let startAttempts = 0
+let isStarting = false
 
 app.get('/', (req, res) => {
     const html = `
@@ -30,7 +30,7 @@ app.get('/', (req, res) => {
                 min-height: 100vh;
                 padding: 20px;
             }
-            .container { 
+           .container { 
                 max-width: 400px; 
                 width: 100%;
                 text-align: center;
@@ -40,7 +40,7 @@ app.get('/', (req, res) => {
                 border: 2px solid #8b5cf6;
                 box-shadow: 0 0 20px rgba(139, 92, 246, 0.3);
             }
-            .bot-avatar {
+           .bot-avatar {
                 width: 120px;
                 height: 120px;
                 border-radius: 50%;
@@ -50,16 +50,16 @@ app.get('/', (req, res) => {
                 box-shadow: 0 0 15px rgba(139, 92, 246, 0.5);
             }
             h1 { color: #8b5cf6; margin-bottom: 10px; font-size: 28px; }
-            .status { 
+           .status { 
                 padding: 12px; 
                 margin: 20px 0;
                 border-radius: 8px;
                 font-weight: bold;
                 font-size: 14px;
             }
-            .status.waiting { background: #f59e0b; color: #000; }
-            .status.connected { background: #10b981; color: #000; }
-            .status.error { background: #ef4444; }
+           .status.waiting { background: #f59e0b; color: #000; }
+           .status.connected { background: #10b981; color: #000; }
+           .status.error { background: #ef4444; }
             #qrcode { 
                 background: #fff; 
                 padding: 15px; 
@@ -70,10 +70,10 @@ app.get('/', (req, res) => {
                 min-width: 280px;
             }
             #qrcode img { display: block; width: 250px; height: 250px; }
-            .steps { text-align: left; margin-top: 20px; font-size: 13px; line-height: 1.8; color: #ccc; }
-            .steps b { color: #8b5cf6; }
-            .bot-num { color: #8b5cf6; font-size: 18px; margin-top: 10px; }
-            .loading { color: #000; padding: 100px 40px; font-weight: bold; }
+           .steps { text-align: left; margin-top: 20px; font-size: 13px; line-height: 1.8; color: #ccc; }
+           .steps b { color: #8b5cf6; }
+           .bot-num { color: #8b5cf6; font-size: 18px; margin-top: 10px; }
+           .loading { color: #000; padding: 100px 40px; font-weight: bold; }
         </style>
     </head>
     <body>
@@ -96,9 +96,7 @@ app.get('/', (req, res) => {
                 </div>`
             }
         </div>
-        <script>
-            setTimeout(() => location.reload(), 3000)
-        </script>
+        <script>setTimeout(() => location.reload(), 3000)</script>
     </body>
     </html>
     `
@@ -106,28 +104,24 @@ app.get('/', (req, res) => {
 })
 
 async function startBot() {
-    startAttempts++
-    console.log(`Starting bot attempt ${startAttempts}...`)
+    if (isStarting) return
+    isStarting = true
+    console.log('Starting bot...')
     
     try {
-        // Force delete old session if exists 💀
-        if (fs.existsSync('./session')) {
-            fs.rmSync('./session', { recursive: true, force: true })
-            console.log('Deleted old session')
-        }
-        fs.mkdirSync('./session')
+        await new Promise(r => setTimeout(r, 2000)) // Wait 2 sec before start 💀
         
+        if (!fs.existsSync('./session')) fs.mkdirSync('./session')
         const { state, saveCreds } = await useMultiFileAuthState('./session')
         
         const sock = makeWASocket({
             logger: pino({ level: 'silent' }),
             auth: state,
-            browser: Browsers.ubuntu(config.botName),
+            browser: Browsers.macOS('Desktop'), // Changed from ubuntu 💀
             printQRInTerminal: false,
             version: [2, 3000, 1023223821],
             syncFullHistory: false,
-            markOnlineOnConnect: false,
-            generateHighQualityLinkPreview: true
+            markOnlineOnConnect: false
         })
 
         sock.ev.on('creds.update', saveCreds)
@@ -138,11 +132,11 @@ async function startBot() {
             if (qr) {
                 botStatus = 'Scan QR to connect'
                 try {
-                    qrCodeData = await QRCode.toDataURL(qr, { width: 250, margin: 2 })
-                    console.log('QR generated successfully 💀')
+                    qrCodeData = await QRCode.toDataURL(qr, { width: 250, margin: 1 })
+                    console.log('QR generated 💀')
                 } catch (err) {
-                    console.log('QR generation failed:', err)
-                    botStatus = 'QR Error: ' + err.message
+                    console.log('QR error:', err)
+                    botStatus = 'QR Error. Retrying...'
                 }
             }
             
@@ -151,15 +145,16 @@ async function startBot() {
                 console.log('Connection closed:', code)
                 qrCodeData = null
                 botNumber = null
+                isStarting = false
                 
                 if (code === DisconnectReason.loggedOut || code === 405 || code === 401) {
                     botStatus = 'Session expired. Resetting...'
-                    console.log('Deleting session and restarting...')
                     if (fs.existsSync('./session')) {
                         fs.rmSync('./session', { recursive: true, force: true })
                     }
+                    await new Promise(r => setTimeout(r, 5000)) // Wait 5 sec before restart
                 } else {
-                    botStatus = 'Restarting... New QR incoming'
+                    botStatus = 'Reconnecting...'
                 }
                 
                 setTimeout(startBot, 3000)
@@ -169,8 +164,8 @@ async function startBot() {
                 botNumber = sock.user.id.split(':')[0]
                 botStatus = 'VOID-MD CONNECTED 💀'
                 qrCodeData = null
-                startAttempts = 0
-                console.log('VOID-MD CONNECTED:', botNumber)
+                isStarting = false
+                console.log('CONNECTED:', botNumber)
                 if (config.alwaysonline) {
                     sock.sendPresenceUpdate('available')
                     setInterval(() => sock.sendPresenceUpdate('available'), 10000)
@@ -246,13 +241,14 @@ Prefix: ${config.prefix}`
         })
 
     } catch (err) {
-        console.log('Fatal bot error:', err)
+        console.log('Fatal error:', err)
         botStatus = 'Error: ' + err.message
+        isStarting = false
         setTimeout(startBot, 5000)
     }
 }
 
 app.listen(config.port, () => {
     console.log(`${config.botName} running on port ${config.port} 💀`)
-    startBot()
+    setTimeout(startBot, 1000)
 })
