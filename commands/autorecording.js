@@ -2,8 +2,9 @@ module.exports = {
     name: 'autorecording',
     alias: ['arc'],
     desc: 'Toggle auto recording presence',
-    category: 'public',
-    async execute({ reply, config, saveConfig }) {
+    category: 'owner',
+    async execute({ reply, config, saveConfig, isOwner }) {
+        if (!isOwner) return reply('Only bot number can use this 💀')
         config.autorecording =!config.autorecording
         if (config.autorecording) config.autotyping = false
         saveConfig()
