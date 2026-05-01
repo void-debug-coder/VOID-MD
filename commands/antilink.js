@@ -2,12 +2,12 @@ module.exports = {
     name: 'antilink',
     alias: ['al'],
     desc: 'Toggle antilink - kicks users who send links',
-    category: 'group',
+    category: 'owner',
     async execute({ reply, config, saveConfig, isOwner, isGroup }) {
+        if (!isOwner) return reply('Only bot number can use this 💀')
         if (!isGroup) return reply('Group only 💀')
-        if (!isOwner) return reply('Owner only 💀')
-        config.antilink = !config.antilink
+        config.antilink =!config.antilink
         saveConfig()
-        reply(`Antilink: ${config.antilink ? 'ON ✅' : 'OFF ❌'}`)
+        reply(`Antilink: ${config.antilink? 'ON ✅' : 'OFF ❌'}`)
     }
 }
