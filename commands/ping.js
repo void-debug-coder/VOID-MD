@@ -1,12 +1,11 @@
 module.exports = {
     name: 'ping',
-    alias: ['p', 'speed'],
     desc: 'Check bot response time',
     category: 'general',
-    async execute({ reply, uptime }) {
+    async execute({ reply }) {
         const start = Date.now()
-        await reply('Testing...💀')
+        await reply('Pong!')
         const end = Date.now()
-        reply(`*Pong!* 🏓\n*Speed:* ${end - start}ms\n*Uptime:* ${uptime()}`)
+        reply(`Response: ${end - start}ms 💀`)
     }
 }
