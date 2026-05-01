@@ -24,7 +24,7 @@ module.exports = {
         const catOrder = ['general', 'download', 'tools', 'fun', 'group', 'owner']
         const catData = {
             general: { emoji: '⚙️', title: 'GENERAL' },
-            owner: { emoji: '👑', title: 'OWNER' },
+            owner: { emoji: '👑', title: 'OWNER ONLY' },
             group: { emoji: '👥', title: 'GROUP' },
             download: { emoji: '📥', title: 'DOWNLOAD' },
             tools: { emoji: '🛠️', title: 'TOOLS' },
@@ -45,13 +45,13 @@ module.exports = {
         const platform = os.type()
         const nodeVer = process.version
         const up = uptime()
-        const botNum = sock.user?.id?.split('@')[0] || 'Unknown'
+        const botNum = sock.user?.id?.split('@')[0].split(':')[0] || 'Unknown'
         const publicCmds = totalCmds - ownerCmds
 
         // Header
         let text = `╭═══〘 *${BOT_NAME}* 〙═══⊷❍\n`
         text += `┃╭─────────────────\n`
-        text += `┃│👤 *Owner:* wa.me/${botNum}\n`
+        text += `┃│👤 *Bot Number:* wa.me/${botNum}\n`
         text += `┃│📌 *Prefix:* [ ${PREFIX} ]\n`
         text += `┃│⚡ *Version:* ${VERSION}\n`
         text += `┃│📊 *Total Cmds:* ${totalCmds}\n`
@@ -61,23 +61,25 @@ module.exports = {
         text += `┃│💾 *RAM:* ${ram}\n`
         text += `┃│🖥️ *Platform:* ${platform}\n`
         text += `┃│🟢 *Node:* ${nodeVer}\n`
-        text += `┃│👑 *Rank:* ${isOwner? 'Owner' : 'User'}\n`
+        text += `┃│👑 *Your Rank:* ${isOwner? 'Owner ✅' : 'User'}\n`
         text += `┃╰─────────────────\n`
         text += `╰══════════════════⊷❍\n\n`
 
-        // Commands by category
+        // Commands by category - SHOW ALL
         for (const category of sortedCats) {
-            if (category === 'owner' &&!isOwner) continue
+            // REMOVED: if (category === 'owner' &&!isOwner) continue
             
             const data = catData[category] || { emoji: '📁', title: category.toUpperCase() }
             const count = categories[category].length
+            const lock = category === 'owner'? ' 🔒' : ''
             
-            text += `╭─❏ *${data.emoji} ${data.title}* ❏\n`
+            text += `╭─❏ *${data.emoji} ${data.title}${lock}* ❏\n`
             text += `┃\n`
             
             categories[category].sort((a, b) => a.name.localeCompare(b.name))
-               .forEach(cmd => {
-                    text += `┃◦ ${PREFIX}${cmd.name}\n`
+              .forEach(cmd => {
+                    const lockIcon = category === 'owner'? '🔒 ' : ''
+                    text += `┃◦ ${lockIcon}${PREFIX}${cmd.name}\n`
                     text += `┃ └ ${cmd.desc}\n`
                 })
             text += `╰─────────────────\n\n`
@@ -85,6 +87,7 @@ module.exports = {
 
         // Footer
         text += `╭═══〘 *VOID-MD* 〙═══⊷❍\n`
+        text += `┃💀 *Note:* 🔒 = Owner commands only\n`
         text += `┃💀 *Type:* ${PREFIX}help <cmd>\n`
         text += `┃💀 *Ex:* ${PREFIX}help play\n`
         text += `┃💀 *Powered by Mr Void*\n`
@@ -97,7 +100,7 @@ module.exports = {
                 contextInfo: {
                     externalAdReply: {
                         title: `${BOT_NAME} ${VERSION}`,
-                        body: `${totalCmds} Commands | ${isOwner? 'Owner Mode' : 'Public Mode'}`,
+                        body: `${totalCmds} Commands | ${isOwner? 'Owner Mode' : 'User Mode'}`,
                         thumbnailUrl: BOT_IMAGE,
                         sourceUrl: 'https://github.com',
                         mediaType: 1,
