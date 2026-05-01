@@ -3,16 +3,14 @@ const express = require('express')
 const QRCode = require('qrcode')
 const pino = require('pino')
 const fs = require('fs')
-const path = require('path')
 const config = require('./config')
 
 const app = express()
 let qrCodeData = null
 let botStatus = 'Starting...'
 let botNumber = null
-let sockInstance = null
+let startAttempts = 0
 
-// Website with QR + Bot Image 💀
 app.get('/', (req, res) => {
     const html = `
     <!DOCTYPE html>
@@ -68,12 +66,14 @@ app.get('/', (req, res) => {
                 border-radius: 10px;
                 margin: 20px 0;
                 display: inline-block;
+                min-height: 280px;
+                min-width: 280px;
             }
             #qrcode img { display: block; width: 250px; height: 250px; }
             .steps { text-align: left; margin-top: 20px; font-size: 13px; line-height: 1.8; color: #ccc; }
             .steps b { color: #8b5cf6; }
             .bot-num { color: #8b5cf6; font-size: 18px; margin-top: 10px; }
-            .loading { color: #000; padding: 40px; font-weight: bold; }
+            .loading { color: #000; padding: 100px 40px; font-weight: bold; }
         </style>
     </head>
     <body>
@@ -97,9 +97,7 @@ app.get('/', (req, res) => {
             }
         </div>
         <script>
-            if (!${botNumber? 'true' : 'false'}) {
-                setInterval(() => location.reload(), 3000)
-            }
+            setTimeout(() => location.reload(), 3000)
         </script>
     </body>
     </html>
@@ -108,21 +106,30 @@ app.get('/', (req, res) => {
 })
 
 async function startBot() {
+    startAttempts++
+    console.log(`Starting bot attempt ${startAttempts}...`)
+    
     try {
-        if (!fs.existsSync('./session')) fs.mkdirSync('./session')
+        // Force delete old session if exists 💀
+        if (fs.existsSync('./session')) {
+            fs.rmSync('./session', { recursive: true, force: true })
+            console.log('Deleted old session')
+        }
+        fs.mkdirSync('./session')
+        
         const { state, saveCreds } = await useMultiFileAuthState('./session')
         
         const sock = makeWASocket({
             logger: pino({ level: 'silent' }),
             auth: state,
             browser: Browsers.ubuntu(config.botName),
-            printQRInTerminal: false, // QR only on website 💀
+            printQRInTerminal: false,
             version: [2, 3000, 1023223821],
             syncFullHistory: false,
-            markOnlineOnConnect: false
+            markOnlineOnConnect: false,
+            generateHighQualityLinkPreview: true
         })
 
-        sockInstance = sock
         sock.ev.on('creds.update', saveCreds)
         
         sock.ev.on('connection.update', async (update) => {
@@ -130,8 +137,13 @@ async function startBot() {
             
             if (qr) {
                 botStatus = 'Scan QR to connect'
-                qrCodeData = await QRCode.toDataURL(qr)
-                console.log('QR generated - check website 💀')
+                try {
+                    qrCodeData = await QRCode.toDataURL(qr, { width: 250, margin: 2 })
+                    console.log('QR generated successfully 💀')
+                } catch (err) {
+                    console.log('QR generation failed:', err)
+                    botStatus = 'QR Error: ' + err.message
+                }
             }
             
             if (connection === 'close') {
@@ -140,18 +152,14 @@ async function startBot() {
                 qrCodeData = null
                 botNumber = null
                 
-                // Auto-delete session on 405 or logout 💀
-                if (code === DisconnectReason.loggedOut || code === 405) {
+                if (code === DisconnectReason.loggedOut || code === 405 || code === 401) {
                     botStatus = 'Session expired. Resetting...'
-                    console.log('Deleting session folder...')
-                    try {
+                    console.log('Deleting session and restarting...')
+                    if (fs.existsSync('./session')) {
                         fs.rmSync('./session', { recursive: true, force: true })
-                        botStatus = 'Restarting... New QR incoming'
-                    } catch (e) {
-                        console.log('Session delete error:', e)
                     }
                 } else {
-                    botStatus = 'Reconnecting...'
+                    botStatus = 'Restarting... New QR incoming'
                 }
                 
                 setTimeout(startBot, 3000)
@@ -161,6 +169,7 @@ async function startBot() {
                 botNumber = sock.user.id.split(':')[0]
                 botStatus = 'VOID-MD CONNECTED 💀'
                 qrCodeData = null
+                startAttempts = 0
                 console.log('VOID-MD CONNECTED:', botNumber)
                 if (config.alwaysonline) {
                     sock.sendPresenceUpdate('available')
@@ -169,7 +178,6 @@ async function startBot() {
             }
         })
 
-        // Command handler 💀
         sock.ev.on('messages.upsert', async ({ messages }) => {
             const m = messages[0]
             if (!m.message) return
@@ -209,15 +217,7 @@ ${config.prefix}antidelete - ${config.antidelete? 'ON' : 'OFF'}
 ${config.prefix}autoread - ${config.autoread? 'ON' : 'OFF'}
 ${config.prefix}autotyping - ${config.autotyping? 'ON' : 'OFF'}
 ${config.prefix}autorecording - ${config.autorecording? 'ON' : 'OFF'}
-${config.prefix}autolike - ${config.autolike? 'ON' : 'OFF'}
-${config.prefix}autoreact - ${config.autoreact? 'ON' : 'OFF'}
-${config.prefix}autoview - ${config.autoview? 'ON' : 'OFF'}
 ${config.prefix}anticall - ${config.anticall? 'ON' : 'OFF'}
-${config.prefix}antilink - ${config.antilink? 'ON' : 'OFF'}
-${config.prefix}antiban - ${config.antiban? 'ON' : 'OFF'}
-${config.prefix}autobio - ${config.autobio? 'ON' : 'OFF'}
-${config.prefix}autosave - ${config.autosave? 'ON' : 'OFF'}
-${config.prefix}chatbot - ${config.chatbot? 'ON' : 'OFF'}
 
 Bot: +${botNum}
 Prefix: ${config.prefix}`
@@ -226,18 +226,11 @@ Prefix: ${config.prefix}`
             
             if (!isOwner) return sock.sendMessage(from, { text: 'Only owner can use this 💀' })
             
-            const toggleCmds = [
-                'alwaysonline', 'antiban', 'anticall', 'antidelete', 'antilink', 
-                'autobio', 'autolike', 'autoreact', 'autoread', 'autorecording', 
-                'autosave', 'autotyping', 'autoview', 'chatbot'
-            ]
+            const toggleCmds = ['alwaysonline', 'antiban', 'anticall', 'antidelete', 'antilink', 'autobio', 'autolike', 'autoreact', 'autoread', 'autorecording', 'autosave', 'autotyping', 'autoview', 'chatbot']
             
             if (toggleCmds.includes(cmd)) {
                 config[cmd] =!config[cmd]
-                await sock.sendMessage(from, { 
-                    text: `*${cmd.toUpperCase()}* ${config[cmd]? 'ON' : 'OFF'} 💀` 
-                })
-                
+                await sock.sendMessage(from, { text: `*${cmd.toUpperCase()}* ${config[cmd]? 'ON' : 'OFF'} 💀` })
                 if (cmd === 'alwaysonline') {
                     sock.sendPresenceUpdate(config.alwaysonline? 'available' : 'unavailable')
                 }
@@ -253,7 +246,7 @@ Prefix: ${config.prefix}`
         })
 
     } catch (err) {
-        console.log('Bot error:', err)
+        console.log('Fatal bot error:', err)
         botStatus = 'Error: ' + err.message
         setTimeout(startBot, 5000)
     }
