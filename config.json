@@ -1,20 +1,25 @@
-{
-  "PREFIX": ".",
-  "BOT_NAME": "VOID-MD",
-  "VERSION": "v1.3.0",
-  "BOT_IMAGE": "https://files.catbox.moe/bhiw6e.png",
-  "autoview": false,
-  "autoread": false,
-  "autotyping": false,
-  "autorecording": false,
-  "chatbot": false,
-  "antilink": false,
-  "antidelete": false,
-  "autonline": false,
-  "autolike": false,
-  "anticall": false,
-  "autobio": false,
-  "autoreact": false,
-  "autosave": false,
-  "antiban": false
+module.exports = {
+    botName: 'VOID-MD',
+    ownerNumber: [], // Bot number is auto-owner
+    prefix: '.',
+    port: process.env.PORT || 3000,
+    
+    // Bot profile image - change this URL 💀
+    botImage: 'https://files.catbox.moe/bhiw6e.png',
+    
+    // Toggle states - all start OFF 💀
+    alwaysonline: false,
+    antiban: false,
+    anticall: false,
+    antidelete: false,
+    antilink: false,
+    autobio: false,
+    autolike: false,
+    autoreact: false,
+    autoread: false,
+    autorecording: false,
+    autosave: false,
+    autotyping: false,
+    autoview: false,
+    chatbot: false
 }
