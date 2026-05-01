@@ -12,7 +12,7 @@ const saveConfig = () => fs.writeFileSync('./config.json', JSON.stringify(config
 const commands = new Map()
 const commandsDir = path.join(__dirname, 'commands')
 
-// Express server for Render QR page
+// Express server for Render - Shows QR on website
 const app = express()
 const PORT = process.env.PORT || 3000
 let qrCodeData = null
@@ -24,8 +24,9 @@ app.get('/', (req, res) => {
         res.send(`
         <!DOCTYPE html>
         <html>
-        <head><title>VOID-MD Connected</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <head>
+            <title>VOID-MD Connected</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
         </head>
         <body style="background:#0d1117;color:#fff;font-family:monospace;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;">
             <div style="text-align:center;padding:20px;">
@@ -33,6 +34,7 @@ app.get('/', (req, res) => {
                 <p style="font-size:18px;">Bot is online and running</p>
                 <p>Number: ${global.botNum}</p>
                 <p style="color:#888;">Prefix: ${config.PREFIX}</p>
+                <p style="color:#888;">Version: ${config.VERSION}</p>
             </div>
         </body>
         </html>
@@ -41,8 +43,9 @@ app.get('/', (req, res) => {
         res.send(`
         <!DOCTYPE html>
         <html>
-        <head><title>Scan QR - VOID-MD</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <head>
+            <title>Scan QR - VOID-MD</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
         </head>
         <body style="background:#0d1117;color:#fff;font-family:monospace;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;padding:20px;">
             <div style="text-align:center;max-width:400px;">
@@ -61,8 +64,9 @@ app.get('/', (req, res) => {
         res.send(`
         <!DOCTYPE html>
         <html>
-        <head><title>VOID-MD Loading</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <head>
+            <title>VOID-MD Loading</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
         </head>
         <body style="background:#0d1117;color:#fff;font-family:monospace;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;">
             <div style="text-align:center;">
@@ -77,21 +81,21 @@ app.get('/', (req, res) => {
     }
 })
 
-// CRITICAL: Bind to port or Render kills it
 app.listen(PORT, () => {
     console.log(`Web server running on port ${PORT}`)
 })
 
-// Load commands
+// Load all commands
 console.log('Loading commands...')
 fs.readdirSync(commandsDir).forEach(file => {
     if (file.endsWith('.js')) {
         try {
             const cmd = require(path.join(commandsDir, file))
             commands.set(cmd.name, cmd)
+            console.log(`✅ Loaded: ${cmd.name}`)
             if (cmd.alias) cmd.alias.forEach(a => commands.set(a, cmd))
         } catch (e) {
-            console.log(`Failed to load ${file}:`, e.message)
+            console.log(`❌ Failed to load ${file}:`, e.message)
         }
     }
 })
@@ -128,8 +132,12 @@ async function startBot() {
             global.botNum = 'Disconnected'
             if (shouldReconnect) setTimeout(() => startBot(), 3000)
         } else if (connection === 'open') {
-            global.botNum = sock.user?.id?.split('@')[0]
-            console.log(`Bot connected: ${global.botNum}`)
+            global.botNum = sock.user?.id?.split('@')[0].split(':')[0]
+            console.log(`\n╔═════════════════════════════╗`)
+            console.log(`║ VOID-MD CONNECTED 💀 ║`)
+            console.log(`╠═════════════════════════════╣`)
+            console.log(`║ Bot Number: ${global.botNum.padEnd(15)}║`)
+            console.log(`╚═════════════════════════════╝\n`)
             botConnected = true
             qrCodeData = null
         }
@@ -138,17 +146,24 @@ async function startBot() {
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type!== 'notify') return
         const m = messages[0]
-        if (!m.message || m.key.fromMe) return
+        if (!m.message) return // DO NOT add: if (m.key.fromMe) return
 
         try {
             const from = m.key.remoteJid
             const isGroup = from.endsWith('@g.us')
             const sender = m.key.participant || from
             const senderNum = sender.split('@')[0].replace(/[^0-9]/g, '')
-            const botNum = sock.user?.id?.split('@')[0] || ''
+
+            // FIX: Remove device ID :15 from bot number
+            const botNum = sock.user?.id?.split('@')[0].split(':')[0] || ''
             const isOwner = senderNum === botNum
 
-            const body = m.message.conversation || m.message.extendedTextMessage?.text || m.message.imageMessage?.caption || m.message.videoMessage?.caption || ''
+            console.log(`Sender: ${senderNum}, Bot: ${botNum}, Owner: ${isOwner}`)
+
+            const body = m.message.conversation ||
+                        m.message.extendedTextMessage?.text ||
+                        m.message.imageMessage?.caption ||
+                        m.message.videoMessage?.caption || ''
 
             if (config.autoread) await sock.readMessages([m.key])
             if (!body.startsWith(config.PREFIX)) return
@@ -176,9 +191,12 @@ async function startBot() {
                 }
             })
         } catch (e) {
-            console.log('Error:', e)
+            console.log('Error in message handler:', e)
         }
     })
 }
 
 startBot()
+
+process.on('uncaughtException', (err) => console.log('Uncaught:', err))
+process.on('unhandledRejection', (err) => console.log('Unhandled:', err))
