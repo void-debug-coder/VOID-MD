@@ -1,13 +1,20 @@
 {
   "PREFIX": ".",
   "BOT_NAME": "VOID-MD",
-  "OWNER_NUMBER": "",
+  "VERSION": "v1.3.0",
+  "BOT_IMAGE": "https://i.imgur.com/placeholder.jpg",
   "autoview": false,
+  "autoread": false,
   "autotyping": false,
   "autorecording": false,
-  "autonline": false,
-  "autoread": false,
-  "antidelete": false,
+  "chatbot": false,
   "antilink": false,
-  "chatbot": false
+  "antidelete": false,
+  "autonline": false,
+  "autolike": false,
+  "anticall": false,
+  "autobio": false,
+  "autoreact": false,
+  "autosave": false,
+  "antiban": false
 }
