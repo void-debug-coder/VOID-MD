@@ -2,7 +2,6 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-// LOCAL FILE PATH
 const BOT_IMAGE = path.join(__dirname, '..', 'assets', 'menu.jpg');
 
 module.exports = {
@@ -51,25 +50,27 @@ module.exports = {
         });
 
         for (const [cat, cmds] of sortedCats) {
-            if (cat === 'owner' &&!isOwner) continue;
+            // REMOVED: if (cat === 'owner' &&!isOwner) continue;
 
             const emoji = categoryEmojis[cat] || '📌';
-            menuText += `╭─〔 ${emoji} *${cat.toUpperCase()}* 〕\n`;
+            const cmdCount = cmds.length;
+            menuText += `╭─〔 ${emoji} *${cat.toUpperCase()}* (${cmdCount}) 〕\n`;
 
             cmds.sort((a, b) => a.name.localeCompare(b.name)).forEach(cmd => {
-                menuText += `│ ▢ ${prefix}${cmd.name}\n`;
+                // Add lock emoji for owner commands if user isn't owner
+                const lock = cmd.ownerOnly &&!isOwner? '🔒 ' : '▢ ';
+                menuText += `│ ${lock}${prefix}${cmd.name}\n`;
             });
 
             menuText += `╰────────────\n\n`;
         }
 
-        menuText += `*Note:* Type ${prefix}help <command> for details\n`;
+        menuText += `*Note:* 🔒 = Owner only commands\n`;
+        menuText += `Type ${prefix}help <command> for details\n`;
         menuText += `*Example:* ${prefix}help tictactoe\n\n`;
         menuText += `_Powered by VOID-MD 💀_`;
 
-        // Send with local image
         try {
-            // Check if file exists first
             if (!fs.existsSync(BOT_IMAGE)) {
                 throw new Error('menu.jpg not found in assets folder');
             }
@@ -101,4 +102,4 @@ function formatUptime(seconds) {
     if (h > 0) return `${h}h ${m}m ${s}s`;
     if (m > 0) return `${m}m ${s}s`;
     return `${s}s`;
-                }
+}
