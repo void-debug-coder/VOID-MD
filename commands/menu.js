@@ -1,5 +1,4 @@
 const os = require('os');
-const moment = require('moment-timezone');
 const axios = require('axios');
 
 module.exports = {
@@ -9,29 +8,32 @@ module.exports = {
     react: '🌟',
     category: 'core',
     async execute(m, { VoidMD, commands }) {
-        try {
-            // ===== CONFIG - EDIT HERE =====
-            const botName = 'VOID-MD';
-            const ownerName = 'Void Dev';
-            const imageUrl = 'https://files.catbox.moe/bhiw6e.png';
-            const prefix = '.';
-            const version = '1.0.0';
-            // ===============================
+        const botName = 'VOID-MD';
+        const ownerName = 'Void Dev';
+        const imageUrl = 'https://files.catbox.moe/bhiw6e.png';
+        const prefix = '.';
+        const version = '1.0.0';
+        let menuText = '';
 
+        try {
+            // System info
             const uptime = process.uptime();
             const h = Math.floor(uptime / 3600);
             const min = Math.floor((uptime % 3600) / 60);
             const s = Math.floor(uptime % 60);
 
             const used = process.memoryUsage();
-            const ramUsed = (used.heapUsed / 1024).toFixed(2);
-            const ramTotal = (os.totalmem() / 1024 / 1024 / 1024).toFixed(2);
+            const ramUsed = (used.heapUsed / 1024 / 1024).toFixed(2);
+            const ramTotal = (os.totalmem() / 1024 / 1024).toFixed(2);
 
-            const time = moment().tz('Africa/Nairobi').format('HH:mm:ss');
-            const date = moment().tz('Africa/Nairobi').format('DD/MM/YYYY');
-            const day = moment().tz('Africa/Nairobi').format('dddd');
+            // Date time - no moment needed
+            const now = new Date();
+            const time = now.toLocaleTimeString('en-KE', { timeZone: 'Africa/Nairobi', hour12: false });
+            const date = now.toLocaleDateString('en-KE', { timeZone: 'Africa/Nairobi' });
+            const day = now.toLocaleDateString('en-KE', { weekday: 'long', timeZone: 'Africa/Nairobi' });
 
-            let menuText = `┏━━━━━━━━━━━━━━━━━━━━━━┓\n`;
+            // Build menu
+            menuText = `┏━━━━━━━━━━━━━━━━━━━━━━┓\n`;
             menuText += `┃ 🌟 *${botName}* 🌟\n`;
             menuText += `┗━━━━━━━━━━━━━━━━━━━━━━┛\n\n`;
 
@@ -55,6 +57,7 @@ module.exports = {
             menuText += `│ 🕐 *Time:* ${time} EAT\n`;
             menuText += `╰─────────────────❒\n\n`;
 
+            // Group commands by category
             const categories = {};
             commands.forEach(cmd => {
                 if (cmd.name === 'menu') return;
@@ -84,33 +87,33 @@ module.exports = {
             menuText += `┗━━━━━━━━━━━━━━━━━━━━━━┛\n\n`;
             menuText += `_⚡ Powered by ${botName} 💀_`;
 
-            // Download image as buffer to bypass WhatsApp URL block
-            const response = await axios.get(imageUrl, {
-                responseType: 'arraybuffer',
-                timeout: 10000,
-                headers: {
-                    'User-Agent': 'Mozilla/5.0'
-                }
-            });
-            const buffer = Buffer.from(response.data, 'binary');
-
-            await VoidMD.sendMessage(m.chat, {
-                image: buffer,
-                caption: menuText,
-                mentions: [m.sender]
-            }, { quoted: m });
-
-        } catch (err) {
-            console.log('[MENU ERROR]', err.message);
-            // Fallback to text if image fails
+            // Send with image - fallback to text if fails
             try {
+                const response = await axios.get(imageUrl, {
+                    responseType: 'arraybuffer',
+                    timeout: 8000,
+                    headers: { 'User-Agent': 'Mozilla/5.0' }
+                });
+                const buffer = Buffer.from(response.data, 'binary');
+
                 await VoidMD.sendMessage(m.chat, {
-                    text: `⚠️ Image load failed\n\n${menuText}`,
+                    image: buffer,
+                    caption: menuText,
                     mentions: [m.sender]
                 }, { quoted: m });
-            } catch (e) {
-                await m.reply('Menu crashed completely 💀 Check Render logs');
+
+            } catch (imgErr) {
+                console.log('[MENU IMG FAIL]', imgErr.message);
+                await VoidMD.sendMessage(m.chat, {
+                    text: menuText,
+                    mentions: [m.sender]
+                }, { quoted: m });
             }
+
+        } catch (err) {
+            console.log('[MENU CRASH]', err);
+            const errorMsg = menuText? menuText : `Menu error: ${err.message}`;
+            await m.reply(errorMsg);
         }
     }
-}
+                    }
