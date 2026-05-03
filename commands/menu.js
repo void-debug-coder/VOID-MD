@@ -1,22 +1,18 @@
 const os = require('os');
-const axios = require('axios');
 
 module.exports = {
     name: 'menu',
     alias: ['help', 'list'],
-    desc: 'Show bot menu with image',
+    desc: 'Show bot menu',
     react: '🌟',
     category: 'core',
     async execute(m, { VoidMD, commands }) {
-        const botName = 'VOID-MD';
-        const ownerName = 'Void Dev';
-        const imageUrl = 'https://files.catbox.moe/bhiw6e.png';
-        const prefix = '.';
-        const version = '1.0.0';
-        let menuText = '';
-
         try {
-            // System info
+            const botName = 'VOID-MD';
+            const ownerName = 'Void Dev';
+            const prefix = '.';
+            const version = '1.0.0';
+
             const uptime = process.uptime();
             const h = Math.floor(uptime / 3600);
             const min = Math.floor((uptime % 3600) / 60);
@@ -26,14 +22,12 @@ module.exports = {
             const ramUsed = (used.heapUsed / 1024 / 1024).toFixed(2);
             const ramTotal = (os.totalmem() / 1024 / 1024).toFixed(2);
 
-            // Date time - no moment needed
             const now = new Date();
             const time = now.toLocaleTimeString('en-KE', { timeZone: 'Africa/Nairobi', hour12: false });
             const date = now.toLocaleDateString('en-KE', { timeZone: 'Africa/Nairobi' });
             const day = now.toLocaleDateString('en-KE', { weekday: 'long', timeZone: 'Africa/Nairobi' });
 
-            // Build menu
-            menuText = `┏━━━━━━━━━━━━━━━━━━━━━━┓\n`;
+            let menuText = `┏━━━━━━━━━━━━━━━━━━━━━━┓\n`;
             menuText += `┃ 🌟 *${botName}* 🌟\n`;
             menuText += `┗━━━━━━━━━━━━━━━━━━━━━━┛\n\n`;
 
@@ -57,7 +51,6 @@ module.exports = {
             menuText += `│ 🕐 *Time:* ${time} EAT\n`;
             menuText += `╰─────────────────❒\n\n`;
 
-            // Group commands by category
             const categories = {};
             commands.forEach(cmd => {
                 if (cmd.name === 'menu') return;
@@ -87,33 +80,14 @@ module.exports = {
             menuText += `┗━━━━━━━━━━━━━━━━━━━━━━┛\n\n`;
             menuText += `_⚡ Powered by ${botName} 💀_`;
 
-            // Send with image - fallback to text if fails
-            try {
-                const response = await axios.get(imageUrl, {
-                    responseType: 'arraybuffer',
-                    timeout: 8000,
-                    headers: { 'User-Agent': 'Mozilla/5.0' }
-                });
-                const buffer = Buffer.from(response.data, 'binary');
-
-                await VoidMD.sendMessage(m.chat, {
-                    image: buffer,
-                    caption: menuText,
-                    mentions: [m.sender]
-                }, { quoted: m });
-
-            } catch (imgErr) {
-                console.log('[MENU IMG FAIL]', imgErr.message);
-                await VoidMD.sendMessage(m.chat, {
-                    text: menuText,
-                    mentions: [m.sender]
-                }, { quoted: m });
-            }
+            await VoidMD.sendMessage(m.chat, {
+                text: menuText,
+                mentions: [m.sender]
+            }, { quoted: m });
 
         } catch (err) {
             console.log('[MENU CRASH]', err);
-            const errorMsg = menuText? menuText : `Menu error: ${err.message}`;
-            await m.reply(errorMsg);
+            await m.reply(`Menu error: ${err.message}`);
         }
     }
                     }
