@@ -1,20 +1,22 @@
 const os = require('os');
 const moment = require('moment-timezone');
+const axios = require('axios');
 
 module.exports = {
     name: 'menu',
     alias: ['help', 'list'],
-    desc: 'Show decorated bot menu',
+    desc: 'Show bot menu with image',
     react: '🌟',
     category: 'core',
     async execute(m, { VoidMD, commands }) {
         try {
-            // ===== CONFIG =====
+            // ===== CONFIG - EDIT HERE =====
             const botName = 'VOID-MD';
             const ownerName = 'Void Dev';
-            const imageUrl = 'https://files.catbox.moe/bhiw6e.png'; // YOUR IMAGE
+            const imageUrl = 'https://files.catbox.moe/bhiw6e.png';
             const prefix = '.';
-            // ===================
+            const version = '1.0.0';
+            // ===============================
 
             const uptime = process.uptime();
             const h = Math.floor(uptime / 3600);
@@ -22,8 +24,8 @@ module.exports = {
             const s = Math.floor(uptime % 60);
 
             const used = process.memoryUsage();
-            const ramUsed = (used.heapUsed / 1024 / 1024).toFixed(2);
-            const ramTotal = (os.totalmem() / 1024).toFixed(2);
+            const ramUsed = (used.heapUsed / 1024).toFixed(2);
+            const ramTotal = (os.totalmem() / 1024 / 1024 / 1024).toFixed(2);
 
             const time = moment().tz('Africa/Nairobi').format('HH:mm:ss');
             const date = moment().tz('Africa/Nairobi').format('DD/MM/YYYY');
@@ -37,7 +39,7 @@ module.exports = {
             menuText += `│ 👤 *User:* @${m.sender.split('@')[0]}\n`;
             menuText += `│ 👑 *Owner:* ${ownerName}\n`;
             menuText += `│ ⚡ *Prefix:* [ ${prefix} ]\n`;
-            menuText += `│ 🔧 *Version:* 1.0.0\n`;
+            menuText += `│ 🔧 *Version:* ${version}\n`;
             menuText += `╰─────────────────❒\n\n`;
 
             menuText += `╭─❒ *SYSTEM*\n`;
@@ -82,15 +84,33 @@ module.exports = {
             menuText += `┗━━━━━━━━━━━━━━━━━━━━━━┛\n\n`;
             menuText += `_⚡ Powered by ${botName} 💀_`;
 
+            // Download image as buffer to bypass WhatsApp URL block
+            const response = await axios.get(imageUrl, {
+                responseType: 'arraybuffer',
+                timeout: 10000,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0'
+                }
+            });
+            const buffer = Buffer.from(response.data, 'binary');
+
             await VoidMD.sendMessage(m.chat, {
-                image: { url: imageUrl },
+                image: buffer,
                 caption: menuText,
                 mentions: [m.sender]
             }, { quoted: m });
 
         } catch (err) {
-            console.log('[MENU ERROR]', err);
-            await m.reply('Menu failed 💀 Image URL dead or blocked');
+            console.log('[MENU ERROR]', err.message);
+            // Fallback to text if image fails
+            try {
+                await VoidMD.sendMessage(m.chat, {
+                    text: `⚠️ Image load failed\n\n${menuText}`,
+                    mentions: [m.sender]
+                }, { quoted: m });
+            } catch (e) {
+                await m.reply('Menu crashed completely 💀 Check Render logs');
+            }
         }
     }
 }
