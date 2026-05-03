@@ -5,13 +5,20 @@ const path = require('path');
 const express = require('express');
 const QRCode = require('qrcode');
 
-const app = express();
+// ===== CONFIG =====
+const PREFIX = '.';
 const PORT = process.env.PORT || 10000;
+// ==================
+
+const app = express();
 let latestQR = null;
 let botStatus = 'Starting...';
+let botMode = 'public'; // 'public' or 'private'
+let OWNER_NUMBER = null; // ← Auto-set when QR is scanned
 
+// EXPRESS ROUTES
 app.get('/', (req, res) => {
-    res.send(`VOID-MD ${botStatus} 💀<br><a href="/qr">Click here for QR Code</a>`);
+    res.send(`VOID-MD ${botStatus} 💀 | Mode: ${botMode} | Owner: ${OWNER_NUMBER || 'Not set'}<br><a href="/qr">Click here for QR Code</a>`);
 });
 
 app.get('/qr', async (req, res) => {
@@ -29,6 +36,7 @@ app.get('/qr', async (req, res) => {
                 <img src="${qrImage}" style="border:8px solid #fff;border-radius:20px;width:300px;" />
                 <p style="font-size:18px;margin-top:20px;">Scan with WhatsApp → Link Device</p>
                 <p style="color:#888;">QR expires in 20s. Page auto-refreshes.</p>
+                <p style="color:#0f0;">You become the owner after scan</p>
             </div>
             <script>setTimeout(()=>location.reload(),20000)</script>
         </body></html>`);
@@ -49,13 +57,13 @@ if (fs.existsSync(commandsPath)) {
             commands.set(command.name, command);
             if (command.alias) command.alias.forEach(a => commands.set(a, command));
         } catch (e) {
-            console.log(`[ERROR] Failed to load ${file}:`, e);
+            console.log(`[ERROR] Failed to load ${file}:`, e.message);
         }
     });
     console.log(`[COMMANDS] Loaded ${commands.size} commands`);
 }
 
-// TEMP FOLDER CLEANUP
+// TEMP FOLDER CLEANUP - every 1hr
 setInterval(() => {
     if (fs.existsSync('./temp')) {
         fs.readdirSync('./temp').forEach(f => {
@@ -92,8 +100,14 @@ async function startVoid() {
             console.log('[CONNECTION] closed, reconnecting:', shouldReconnect);
             botStatus = 'Reconnecting...';
             if (shouldReconnect) startVoid();
+            else {
+                botStatus = 'Logged Out';
+                OWNER_NUMBER = null; // Reset owner on logout
+                console.log('[CONNECTION] Logged out. Delete session folder to get new QR');
+            }
         } else if (connection === 'open') {
-            console.log('[CONNECTION] VOID-MD Connected ✅');
+            OWNER_NUMBER = VoidMD.user.id; // ← AUTO-SET OWNER TO SCANNED NUMBER
+            console.log('[CONNECTION] VOID-MD Connected ✅ | Owner:', OWNER_NUMBER);
             botStatus = 'Connected';
             latestQR = null;
         }
@@ -101,47 +115,69 @@ async function startVoid() {
 
     VoidMD.ev.on('creds.update', saveCreds);
 
-    // MESSAGE HANDLER WITH REACTIONS
+    // MESSAGE HANDLER
     VoidMD.ev.on('messages.upsert', async ({ messages }) => {
         const m = messages[0];
-        if (!m.message || m.key.fromMe) return;
+        if (!m.message) return;
 
         m.message = m.message.ephemeralMessage?.message || m.message;
         const type = Object.keys(m.message)[0];
         const body = m.message.conversation || m.message[type]?.text || m.message[type]?.caption || '';
-        const prefix = '.';
-        const isCmd = body.startsWith(prefix);
-        const command = isCmd ? body.slice(prefix.length).trim().split(' ')[0].toLowerCase() : '';
+        const isCmd = body.startsWith(PREFIX);
+        const command = isCmd ? body.slice(PREFIX.length).trim().split(' ')[0].toLowerCase() : '';
         const args = body.trim().split(/ +/).slice(1);
         const text = args.join(' ');
         const sender = m.key.remoteJid;
         const isGroup = sender.endsWith('@g.us');
         const senderName = m.pushName || 'User';
+        const isOwner = sender === OWNER_NUMBER || m.key.fromMe;
 
+        // Reply function
         m.reply = (text) => VoidMD.sendMessage(sender, { text }, { quoted: m });
 
-        if (isCmd) console.log(`[CMD] ${command} | [FROM] ${sender} | [NAME] ${senderName}`);
+        // PUBLIC/PRIVATE MODE CHECK
+        if (isCmd && botMode === 'private' && !isOwner) return;
 
+        if (isCmd) console.log(`[CMD] ${command} | [FROM] ${sender} | Mode: ${botMode} | Owner: ${isOwner}`);
+
+        // COMMAND HANDLER WITH REACTIONS
         if (isCmd && commands.has(command)) {
             const cmdData = commands.get(command);
             const emoji = cmdData.react || '💀';
+
+            // Owner-only check
+            if (cmdData.ownerOnly && !isOwner) {
+                return await VoidMD.sendMessage(sender, { react: { text: '⛔', key: m.key } });
+            }
+
             try {
                 await VoidMD.sendMessage(sender, { react: { text: emoji, key: m.key } });
-                await cmdData.execute(m, { VoidMD, text, args, command, isGroup, sender, senderName });
+                await cmdData.execute(m, {
+                    VoidMD,
+                    text,
+                    args,
+                    command,
+                    isGroup,
+                    senderName,
+                    isOwner,
+                    OWNER_NUMBER,
+                    botMode,
+                    setBotMode: (mode) => { botMode = mode; }
+                });
                 await VoidMD.sendMessage(sender, { react: { text: '✅', key: m.key } });
             } catch (e) {
-                console.log('[CMD ERROR]', e);
+                console.log('[CMD ERROR]', command, e.message);
                 await VoidMD.sendMessage(sender, { react: { text: '❌', key: m.key } });
                 m.reply('Command failed 💀');
             }
             return;
         }
 
+        // Default ping
         if (command === 'ping') {
             const start = Date.now();
             await VoidMD.sendMessage(sender, { react: { text: '🏓', key: m.key } });
-            await m.reply('Pong!');
-            await m.reply(`Speed: ${Date.now() - start}ms 💀`);
+            await m.reply(`Pong! ${Date.now() - start}ms 💀\nMode: ${botMode}\nOwner: ${OWNER_NUMBER === sender? 'You' : 'No'}`);
         }
     });
 }
