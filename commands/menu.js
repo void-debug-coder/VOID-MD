@@ -1,105 +1,96 @@
-const fs = require('fs');
-const path = require('path');
 const os = require('os');
-
-const BOT_IMAGE = path.join(__dirname, '..', 'assets', 'menu.jpg');
+const moment = require('moment-timezone');
 
 module.exports = {
     name: 'menu',
-    alias: ['help', 'commands', 'list'],
-    desc: 'Show bot menu',
-    react: '📜',
+    alias: ['help', 'list'],
+    desc: 'Show decorated bot menu',
+    react: '🌟',
     category: 'core',
-    async execute(m, { VoidMD, prefix, commands }) {
-        const uptime = process.uptime();
-        const uptimeStr = formatUptime(uptime);
-        const usedRAM = (process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2);
-        const totalRAM = (os.totalmem() / 1024 / 1024).toFixed(2);
-        const platform = os.platform();
+    async execute(m, { VoidMD, commands }) {
+        try {
+            // ===== CONFIG =====
+            const botName = 'VOID-MD';
+            const ownerName = 'Void Dev';
+            const imageUrl = 'https://files.catbox.moe/bhiw6e.png'; // YOUR IMAGE
+            const prefix = '.';
+            // ===================
 
-        const categories = {};
-        commands.forEach(cmd => {
-            const cat = cmd.category || 'misc';
-            if (!categories[cat]) categories[cat] = [];
-            categories[cat].push(cmd);
-        });
+            const uptime = process.uptime();
+            const h = Math.floor(uptime / 3600);
+            const min = Math.floor((uptime % 3600) / 60);
+            const s = Math.floor(uptime % 60);
 
-        const isOwner = m.sender === VoidMD.user.id || m.sender.includes(VoidMD.user.id.split(':')[0]);
+            const used = process.memoryUsage();
+            const ramUsed = (used.heapUsed / 1024 / 1024).toFixed(2);
+            const ramTotal = (os.totalmem() / 1024).toFixed(2);
 
-        let menuText = `╭─〔 *VOID-MD* 〕\n`;
-        menuText += `│\n`;
-        menuText += `│ 👤 *User:* @${m.sender.split('@')[0]}\n`;
-        menuText += `│ 🤖 *Bot:* ${VoidMD.user.name || 'VOID-MD'}\n`;
-        menuText += `│ ⏰ *Uptime:* ${uptimeStr}\n`;
-        menuText += `│ 💾 *RAM:* ${usedRAM}MB / ${totalRAM}GB\n`;
-        menuText += `│ 🖥️ *Platform:* ${platform}\n`;
-        menuText += `│ 📊 *Commands:* ${commands.size}\n`;
-        menuText += `│ 🔰 *Prefix:* ${prefix}\n`;
-        menuText += `│\n`;
-        menuText += `╰────────────\n\n`;
+            const time = moment().tz('Africa/Nairobi').format('HH:mm:ss');
+            const date = moment().tz('Africa/Nairobi').format('DD/MM/YYYY');
+            const day = moment().tz('Africa/Nairobi').format('dddd');
 
-        const categoryEmojis = {
-            owner: '👑', group: '👥', game: '🎮', core: '⚙️',
-            download: '📥', convert: '🔄', search: '🔍',
-            tools: '🛠️', fun: '🎉', misc: '📦'
-        };
+            let menuText = `┏━━━━━━━━━━━━━━━━━━━━━━┓\n`;
+            menuText += `┃ 🌟 *${botName}* 🌟\n`;
+            menuText += `┗━━━━━━━━━━━━━━━━━━━━━━┛\n\n`;
 
-        const sortedCats = Object.entries(categories).sort((a, b) => {
-            const order = ['core', 'game', 'group', 'tools', 'owner', 'download', 'convert', 'search', 'fun', 'misc'];
-            return order.indexOf(a[0]) - order.indexOf(b[0]);
-        });
+            menuText += `╭─❒ *BOT INFO*\n`;
+            menuText += `│ 👤 *User:* @${m.sender.split('@')[0]}\n`;
+            menuText += `│ 👑 *Owner:* ${ownerName}\n`;
+            menuText += `│ ⚡ *Prefix:* [ ${prefix} ]\n`;
+            menuText += `│ 🔧 *Version:* 1.0.0\n`;
+            menuText += `╰─────────────────❒\n\n`;
 
-        for (const [cat, cmds] of sortedCats) {
-            // REMOVED: if (cat === 'owner' &&!isOwner) continue;
+            menuText += `╭─❒ *SYSTEM*\n`;
+            menuText += `│ ⏰ *Uptime:* ${h}h ${min}m ${s}s\n`;
+            menuText += `│ 💾 *RAM:* ${ramUsed}MB / ${ramTotal}GB\n`;
+            menuText += `│ 🖥️ *Platform:* ${os.platform()}\n`;
+            menuText += `│ 📊 *Commands:* ${commands.size}\n`;
+            menuText += `╰─────────────────❒\n\n`;
 
-            const emoji = categoryEmojis[cat] || '📌';
-            const cmdCount = cmds.length;
-            menuText += `╭─〔 ${emoji} *${cat.toUpperCase()}* (${cmdCount}) 〕\n`;
+            menuText += `╭─❒ *DATE & TIME*\n`;
+            menuText += `│ 📅 *Date:* ${date}\n`;
+            menuText += `│ 📆 *Day:* ${day}\n`;
+            menuText += `│ 🕐 *Time:* ${time} EAT\n`;
+            menuText += `╰─────────────────❒\n\n`;
 
-            cmds.sort((a, b) => a.name.localeCompare(b.name)).forEach(cmd => {
-                // Add lock emoji for owner commands if user isn't owner
-                const lock = cmd.ownerOnly &&!isOwner? '🔒 ' : '▢ ';
-                menuText += `│ ${lock}${prefix}${cmd.name}\n`;
+            const categories = {};
+            commands.forEach(cmd => {
+                if (cmd.name === 'menu') return;
+                const cat = (cmd.category || 'misc').toUpperCase();
+                if (!categories[cat]) categories[cat] = [];
+                categories[cat].push(cmd.name);
             });
 
-            menuText += `╰────────────\n\n`;
-        }
+            const catEmojis = {
+                'CORE': '⚙️', 'GAME': '🎮', 'GROUP': '👥',
+                'DOWNLOAD': '📥', 'CONVERT': '🔄', 'SEARCH': '🔍',
+                'FUN': '🎉', 'TOOLS': '🛠️', 'OWNER': '👑', 'MISC': '📦'
+            };
 
-        menuText += `*Note:* 🔒 = Owner only commands\n`;
-        menuText += `Type ${prefix}help <command> for details\n`;
-        menuText += `*Example:* ${prefix}help tictactoe\n\n`;
-        menuText += `_Powered by VOID-MD 💀_`;
-
-        try {
-            if (!fs.existsSync(BOT_IMAGE)) {
-                throw new Error('menu.jpg not found in assets folder');
+            for (const cat in categories) {
+                const emoji = catEmojis[cat] || '📁';
+                menuText += `╭─❒ ${emoji} *${cat}* [${categories[cat].length}]\n`;
+                categories[cat].sort().forEach(cmd => {
+                    menuText += `│ ◦ ${prefix}${cmd}\n`;
+                });
+                menuText += `╰─────────────────❒\n\n`;
             }
 
-            const imageBuffer = fs.readFileSync(BOT_IMAGE);
+            menuText += `┏━━━━━━━━━━━━━━━━━━━━━━┓\n`;
+            menuText += `┃ 💡 *Type ${prefix}help <cmd>*\n`;
+            menuText += `┃ for command info\n`;
+            menuText += `┗━━━━━━━━━━━━━━━━━━━━━━┛\n\n`;
+            menuText += `_⚡ Powered by ${botName} 💀_`;
+
             await VoidMD.sendMessage(m.chat, {
-                image: imageBuffer,
+                image: { url: imageUrl },
                 caption: menuText,
                 mentions: [m.sender]
             }, { quoted: m });
 
-        } catch (e) {
-            console.log('[MENU IMAGE ERROR]', e.message);
-            await VoidMD.sendMessage(m.chat, {
-                text: menuText + '\n\n⚠️ *Menu image missing* - Add menu.jpg to assets/',
-                mentions: [m.sender]
-            }, { quoted: m });
+        } catch (err) {
+            console.log('[MENU ERROR]', err);
+            await m.reply('Menu failed 💀 Image URL dead or blocked');
         }
     }
-}
-
-function formatUptime(seconds) {
-    const d = Math.floor(seconds / 86400);
-    const h = Math.floor((seconds % 86400) / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
-
-    if (d > 0) return `${d}d ${h}h ${m}m`;
-    if (h > 0) return `${h}h ${m}m ${s}s`;
-    if (m > 0) return `${m}m ${s}s`;
-    return `${s}s`;
 }
