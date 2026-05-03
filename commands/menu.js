@@ -1,20 +1,24 @@
 const os = require('os');
+const axios = require('axios');
 
 module.exports = {
     name: 'menu',
     alias: ['help', 'list', 'h'],
-    desc: 'Display bot menu with all commands',
+    desc: 'Display bot menu with image',
     react: '🌟',
     category: 'core',
     async execute(m, { VoidMD, commands }) {
-        try {
-            // ===== CONFIG - EDIT YOUR INFO =====
-            const botName = 'VOID-MD';
-            const ownerName = 'Void Dev';
-            const prefix = '.';
-            const version = '1.0.0';
-            // ===================================
+        // ===== CONFIG - EDIT HERE =====
+        const botName = 'VOID-MD';
+        const ownerName = 'Void Dev';
+        const imageUrl = 'https://files.catbox.moe/bhiw6e.png';
+        const prefix = '.';
+        const version = '1.0.0';
+        // ===============================
+        
+        let menuText = '';
 
+        try {
             // System stats
             const uptime = process.uptime();
             const h = Math.floor(uptime / 3600);
@@ -22,10 +26,10 @@ module.exports = {
             const s = Math.floor(uptime % 60);
 
             const used = process.memoryUsage();
-            const ramUsed = (used.heapUsed / 1024 / 1024).toFixed(2);
-            const ramTotal = (os.totalmem() / 1024 / 1024).toFixed(2);
+            const ramUsed = (used.heapUsed / 1024).toFixed(2);
+            const ramTotal = (os.totalmem() / 1024).toFixed(2);
 
-            // Nairobi time using built-in Date
+            // Nairobi time - no moment needed
             const now = new Date();
             const time = now.toLocaleTimeString('en-KE', { 
                 timeZone: 'Africa/Nairobi', 
@@ -42,12 +46,11 @@ module.exports = {
                 timeZone: 'Africa/Nairobi' 
             });
 
-            // Build menu header
-            let menuText = `┏━━━━━━━━━━━━━━━━━━━━━━┓\n`;
+            // Build menu
+            menuText = `┏━━━━━━━━━━━━━━━━━━━━━━┓\n`;
             menuText += `┃ 🌟 *${botName}* 🌟\n`;
             menuText += `┗━━━━━━━━━━━━━━━━━━━━━━┛\n\n`;
 
-            // Bot info section
             menuText += `╭─❒ *BOT INFO*\n`;
             menuText += `│ 👤 *User:* @${m.sender.split('@')[0]}\n`;
             menuText += `│ 👑 *Owner:* ${ownerName}\n`;
@@ -55,7 +58,6 @@ module.exports = {
             menuText += `│ 🔧 *Version:* ${version}\n`;
             menuText += `╰─────────────────❒\n\n`;
 
-            // System section
             menuText += `╭─❒ *SYSTEM*\n`;
             menuText += `│ ⏰ *Uptime:* ${h}h ${min}m ${s}s\n`;
             menuText += `│ 💾 *RAM:* ${ramUsed}MB / ${ramTotal}GB\n`;
@@ -63,7 +65,6 @@ module.exports = {
             menuText += `│ 📊 *Commands:* ${commands.size}\n`;
             menuText += `╰─────────────────❒\n\n`;
 
-            // Date time section
             menuText += `╭─❒ *DATE & TIME*\n`;
             menuText += `│ 📅 *Date:* ${date}\n`;
             menuText += `│ 📆 *Day:* ${day}\n`;
@@ -79,7 +80,6 @@ module.exports = {
                 categories[cat].push(cmd.name);
             });
 
-            // Category emojis
             const catEmojis = {
                 'CORE': '⚙️', 'GAME': '🎮', 'GROUP': '👥',
                 'DOWNLOAD': '📥', 'CONVERT': '🔄', 'SEARCH': '🔍',
@@ -87,7 +87,6 @@ module.exports = {
                 'MISC': '📦', 'AI': '🤖'
             };
 
-            // Add each category
             const sortedCats = Object.keys(categories).sort();
             for (const cat of sortedCats) {
                 const emoji = catEmojis[cat] || '📁';
@@ -99,22 +98,40 @@ module.exports = {
                 menuText += `╰─────────────────❒\n\n`;
             }
 
-            // Footer
             menuText += `┏━━━━━━━━━━━━━━━━━━━━━━┓\n`;
             menuText += `┃ 💡 *Type ${prefix}help <cmd>*\n`;
             menuText += `┃ for command info\n`;
             menuText += `┗━━━━━━━━━━━━━━━━━━━━━━┛\n\n`;
             menuText += `_⚡ Powered by ${botName} 💀_`;
 
-            // Send menu
+            // Download image as buffer to bypass WhatsApp URL block
+            const response = await axios.get(imageUrl, {
+                responseType: 'arraybuffer',
+                timeout: 10000,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+            });
+            const buffer = Buffer.from(response.data, 'binary');
+
             await VoidMD.sendMessage(m.chat, {
-                text: menuText,
+                image: buffer,
+                caption: menuText,
                 mentions: [m.sender]
             }, { quoted: m });
 
         } catch (err) {
-            console.log('[MENU ERROR]', err);
-            await m.reply(`❌ Menu failed: ${err.message}\n\nCheck Render logs for details.`);
+            console.log('[MENU ERROR]', err.message);
+            // Fallback: if image download fails, send text only
+            try {
+                const fallbackText = menuText || `❌ Menu failed to generate`;
+                await VoidMD.sendMessage(m.chat, {
+                    text: fallbackText,
+                    mentions: [m.sender]
+                }, { quoted: m });
+            } catch (e) {
+                await m.reply('Menu crashed completely 💀 Check Render logs');
+            }
         }
     }
-                    }
+}
