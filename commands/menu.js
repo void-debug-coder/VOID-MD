@@ -8,22 +8,24 @@ module.exports = {
     react: '🌟',
     category: 'core',
     async execute(m, { VoidMD, commands }) {
-        // ===== CONFIG =====
+        // ===== CONFIG - CHANGE THESE =====
         const botName = 'VOID-MD';
         const ownerName = 'Void Dev';
         const imageUrl = 'https://files.catbox.moe/bhiw6e.png';
         const prefix = '.';
         const version = '1.0.0';
-        // ==================
+        // ================================
 
-        const jid = m.key.remoteJid; // Fix 1: Use jid instead of m.chat
-        const sender = m.key.participant || m.key.remoteJid; // Fix 2: Proper sender
+        const jid = m.key.remoteJid;
+        const sender = m.key.participant || m.key.remoteJid;
         const pushName = m.pushName || sender.split('@')[0];
 
         let menuText = '';
 
         try {
-            // System stats
+            console.log('[MENU] Commands size:', commands?.size); // DEBUG LINE
+
+            // System stats - RAM MATH FIXED
             const uptime = process.uptime();
             const h = Math.floor(uptime / 3600);
             const min = Math.floor((uptime % 3600) / 60);
@@ -31,21 +33,16 @@ module.exports = {
 
             const used = process.memoryUsage();
             const ramUsed = (used.heapUsed / 1024 / 1024).toFixed(2); // MB
-            const ramTotal = (os.totalmem() / 1024).toFixed(2); // GB
+            const ramTotal = (os.totalmem() / 1024 / 1024).toFixed(2); // GB - FIXED
 
             // Nairobi time
             const now = new Date();
-            const time = now.toLocaleTimeString('en-KE', {
-                timeZone: 'Africa/Nairobi',
-                hour12: false
-            });
-            const date = now.toLocaleDateString('en-KE', {
-                timeZone: 'Africa/Nairobi',
-                day: '2-digit', month: '2-digit', year: 'numeric'
-            });
-            const day = now.toLocaleDateString('en-KE', {
-                weekday: 'long', timeZone: 'Africa/Nairobi'
-            });
+            const time = now.toLocaleTimeString('en-KE', { timeZone: 'Africa/Nairobi', hour12: false });
+            const date = now.toLocaleDateString('en-KE', { timeZone: 'Africa/Nairobi', day: '2-digit', month: '2-digit', year: 'numeric' });
+            const day = now.toLocaleDateString('en-KE', { weekday: 'long', timeZone: 'Africa/Nairobi' });
+
+            // Commands count
+            const totalCommands = commands?.size || 0;
 
             // Build menu
             menuText = `┏━━━━━━━━━━━━━━━━━━━━━━┓\n`;
@@ -63,7 +60,7 @@ module.exports = {
             menuText += `│ ⏰ *Uptime:* ${h}h ${min}m ${s}s\n`;
             menuText += `│ 💾 *RAM:* ${ramUsed}MB / ${ramTotal}GB\n`;
             menuText += `│ 🖥️ *Platform:* ${os.platform()}\n`;
-            menuText += `│ 📊 *Commands:* ${commands?.size || Object.keys(commands || {}).length}\n`; // Fix 3
+            menuText += `│ 📊 *Commands:* ${totalCommands}\n`;
             menuText += `╰─────────────────❒\n\n`;
 
             menuText += `╭─❒ *DATE & TIME*\n`;
@@ -74,8 +71,7 @@ module.exports = {
 
             // Group commands by category
             const categories = {};
-            const cmdList = commands?.forEach? commands : new Map(Object.entries(commands || {}));
-            cmdList.forEach(cmd => {
+            commands.forEach(cmd => {
                 if (!cmd.name || cmd.name === 'menu') return;
                 const cat = (cmd.category || 'misc').toUpperCase();
                 if (!categories[cat]) categories[cat] = [];
@@ -90,14 +86,21 @@ module.exports = {
             };
 
             const sortedCats = Object.keys(categories).sort();
-            for (const cat of sortedCats) {
-                const emoji = catEmojis[cat] || '📁';
-                const cmds = categories[cat].sort();
-                menuText += `╭─❒ ${emoji} *${cat}* [${cmds.length}]\n`;
-                cmds.forEach(cmd => {
-                    menuText += `│ ◦ ${prefix}${cmd}\n`;
-                });
+            if (sortedCats.length === 0) {
+                menuText += `╭─❒ 📁 *NO OTHER COMMANDS*\n`;
+                menuText += `│ Only menu.js found\n`;
+                menuText += `│ Add more files to /commands\n`;
                 menuText += `╰─────────────────❒\n\n`;
+            } else {
+                for (const cat of sortedCats) {
+                    const emoji = catEmojis[cat] || '📁';
+                    const cmds = categories[cat].sort();
+                    menuText += `╭─❒ ${emoji} *${cat}* [${cmds.length}]\n`;
+                    cmds.forEach(cmd => {
+                        menuText += `│ ◦ ${prefix}${cmd}\n`;
+                    });
+                    menuText += `╰─────────────────❒\n\n`;
+                }
             }
 
             menuText += `┏━━━━━━━━━━━━━━━━━━━━━━┓\n`;
@@ -121,9 +124,8 @@ module.exports = {
             }, { quoted: m });
 
         } catch (err) {
-            console.log('[MENU ERROR]', err.message, err.stack);
-            const fallbackText = menuText || `❌ Menu crashed: ${err.message}`;
-            await VoidMD.sendMessage(jid, { text: fallbackText }, { quoted: m }).catch(() => {});
+            console.log('[MENU ERROR]', err.message);
+            await VoidMD.sendMessage(jid, { text: `❌ Menu Error: ${err.message}` }, { quoted: m }).catch(() => {});
         }
     }
-            }
+    }
