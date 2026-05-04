@@ -14,7 +14,6 @@ let latestQR = null;
 let botStatus = 'Starting...';
 let OWNER_NUMBER = null;
 
-// Auto-load owner if exists
 const OWNER_FILE = './owner.json';
 if (fs.existsSync(OWNER_FILE)) {
     OWNER_NUMBER = JSON.parse(fs.readFileSync(OWNER_FILE)).owner;
@@ -40,6 +39,12 @@ if (fs.existsSync(commandsPath)) {
     console.log('ERROR: commands folder not found!');
 }
 
+// Keep Render alive
+app.get('/ping', (req, res) => res.send('Bot alive'));
+setInterval(() => {
+    require('https').get(`https://${process.env.RENDER_EXTERNAL_URL}/ping`).on('error', () => {});
+}, 240000);
+
 // Web QR page
 app.get('/', async (req, res) => {
     if (botStatus === 'Connected') {
@@ -54,85 +59,117 @@ app.get('/', async (req, res) => {
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 
 async function startBot() {
-    const { state, saveCreds } = await useMultiFileAuthState('session');
-    const { version } = await fetchLatestBaileysVersion();
+    try {
+        console.log('[BOT] Starting Baileys...');
 
-    const sock = makeWASocket({
-        version,
-        logger: pino({ level: 'silent' }),
-        auth: state,
-        browser: ['VOID-MD', 'Chrome', '1.0.0'],
-        getMessage: async () => { return { conversation: 'VOID-MD' } } // CRITICAL FOR COMMANDS
-    });
-
-    sock.ev.on('creds.update', saveCreds);
-
-    sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect, qr } = update;
-
-        if (qr) {
-            latestQR = await qrcode.toDataURL(qr);
-            botStatus = 'Waiting for QR scan';
-            console.log('QR ready at your Render URL');
+        if (!fs.existsSync('./session')) {
+            fs.mkdirSync('./session');
+            console.log('[BOT] Created session folder');
         }
 
-        if (connection === 'close') {
-            const shouldReconnect = lastDisconnect.error?.output?.statusCode!== DisconnectReason.loggedOut;
-            botStatus = 'Disconnected';
-            latestQR = null;
-            if (shouldReconnect) startBot();
-            else {
-                if (fs.existsSync(OWNER_FILE)) fs.unlinkSync(OWNER_FILE);
-                OWNER_NUMBER = null;
+        const { state, saveCreds } = await useMultiFileAuthState('./session');
+        const { version } = await fetchLatestBaileysVersion();
+        console.log('[BOT] Baileys version:', version);
+
+        const sock = makeWASocket({
+            version,
+            logger: pino({ level: 'silent' }),
+            auth: state,
+            browser: ['VOID-MD', 'Chrome', '1.0.0'],
+            getMessage: async () => { return { conversation: 'VOID-MD' } },
+            markOnlineOnConnect: true, // CRITICAL: Forces messages to come through
+            syncFullHistory: false,
+            fireInitQueries: false
+        });
+
+        sock.ev.on('creds.update', saveCreds);
+
+        sock.ev.on('connection.update', async (update) => {
+            const { connection, lastDisconnect, qr } = update;
+            console.log('[CONNECTION]', connection);
+
+            if (qr) {
+                latestQR = await qrcode.toDataURL(qr);
+                botStatus = 'Waiting for QR scan';
+                console.log('QR ready at your Render URL');
             }
-        } else if (connection === 'open') {
-            botStatus = 'Connected';
-            latestQR = null;
-            
-            // AUTO-SET OWNER TO WHOEVER SCANS QR
-            if (!OWNER_NUMBER && sock.user?.id) {
-                OWNER_NUMBER = sock.user.id.split(':')[0];
-                fs.writeFileSync(OWNER_FILE, JSON.stringify({ owner: OWNER_NUMBER }));
-                console.log('OWNER SET TO:', OWNER_NUMBER);
-                await sock.sendMessage(OWNER_NUMBER + '@s.whatsapp.net', { 
-                    text: `✅ *You are now VOID-MD owner*\nNumber: ${OWNER_NUMBER}\n\nType ${prefix}ping to test` 
+
+            if (connection === 'close') {
+                const shouldReconnect = lastDisconnect?.error?.output?.statusCode!== DisconnectReason.loggedOut;
+                botStatus = 'Disconnected';
+                latestQR = null;
+                console.log('[BOT] Connection closed. Reconnect:', shouldReconnect);
+                if (shouldReconnect) setTimeout(startBot, 5000);
+                else {
+                    if (fs.existsSync(OWNER_FILE)) fs.unlinkSync(OWNER_FILE);
+                    OWNER_NUMBER = null;
+                }
+            } else if (connection === 'open') {
+                botStatus = 'Connected';
+                latestQR = null;
+
+                if (!OWNER_NUMBER && sock.user?.id) {
+                    OWNER_NUMBER = sock.user.id.split(':')[0];
+                    fs.writeFileSync(OWNER_FILE, JSON.stringify({ owner: OWNER_NUMBER }));
+                    console.log('OWNER SET TO:', OWNER_NUMBER);
+                    await sock.sendMessage(OWNER_NUMBER + '@s.whatsapp.net', {
+                        text: `✅ *You are now VOID-MD owner*\nNumber: ${OWNER_NUMBER}\n\nType ${prefix}ping to test`
+                    }).catch(() => {});
+                }
+                console.log('Connected. Owner:', OWNER_NUMBER);
+            }
+        });
+
+        sock.ev.on('messages.upsert', async ({ messages, type }) => {
+            console.log('RAW EVENT:', type); // Debug: remove after working
+            if (type!== 'notify') return;
+            const m = messages[0];
+            if (!m.message) return;
+
+            const botNumber = sock.user?.id?.split(':')[0];
+            const sender = m.key.participant || m.key.remoteJid;
+            if (sender.split('@')[0] === botNumber) return;
+
+            const body = m.message.conversation
+                || m.message.extendedTextMessage?.text
+                || m.message.imageMessage?.caption
+                || m.message.videoMessage?.caption
+                || '';
+            console.log('[MSG]', sender, ':', body);
+
+            if (!body.startsWith(prefix)) return;
+
+            const args = body.slice(prefix.length).trim().split(/ +/);
+            const cmdName = args.shift().toLowerCase();
+            console.log('[CMD]', cmdName);
+
+            const command = commands.get(cmdName) || [...commands.values()].find(c => c.alias?.includes(cmdName));
+            if (!command) {
+                console.log('[CMD] Not found:', cmdName);
+                return;
+            }
+
+            try {
+                await command.execute(m, {
+                    VoidMD: sock,
+                    commands,
+                    args,
+                    prefix,
+                    owner: OWNER_NUMBER,
+                    sender: sender
                 });
+            } catch (e) {
+                console.log(`[CMD ERROR] ${cmdName}:`, e.message);
+                await sock.sendMessage(m.key.remoteJid, { text: `Error: ${e.message}` }, { quoted: m }).catch(() => {});
             }
-            console.log('Connected. Owner:', OWNER_NUMBER);
-        }
-    });
+        });
 
-    // COMMAND HANDLER WITH DEBUG
-    sock.ev.on('messages.upsert', async ({ messages, type }) => {
-        if (type!== 'notify') return;
-        const m = messages[0];
-        if (!m.message) return;
-
-        const botNumber = sock.user?.id?.split(':')[0];
-        const sender = m.key.participant || m.key.remoteJid;
-        if (sender.split('@')[0] === botNumber) return; // ignore bot messages
-
-        const body = m.message.conversation || m.message.extendedTextMessage?.text || m.message.imageMessage?.caption || '';
-        console.log('[MSG]', sender, ':', body);
-
-        if (!body.startsWith(prefix)) return;
-
-        const args = body.slice(prefix.length).trim().split(/ +/);
-        const cmdName = args.shift().toLowerCase();
-        console.log('[CMD]', cmdName);
-
-        const command = commands.get(cmdName) || [...commands.values()].find(c => c.alias?.includes(cmdName));
-        if (!command) {
-            console.log('[CMD] Not found:', cmdName);
-            return;
-        }
-
-        try {
-            await command.execute(m, { VoidMD: sock, commands, args, prefix, owner: OWNER_NUMBER });
-        } catch (e) {
-            console.log(`[CMD ERROR] ${cmdName}:`, e.message);
-        }
-    });
+    } catch (error) {
+        console.log('[BOT CRASH]', error.message);
+        console.log(error.stack);
+        botStatus = 'Crashed: ' + error.message;
+        setTimeout(startBot, 10000);
+    }
 }
 
 startBot();
