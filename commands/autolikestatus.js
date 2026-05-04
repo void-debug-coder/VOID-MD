@@ -1,43 +1,29 @@
-let statusLikeListener = null;
-
 module.exports = {
     name: 'autolikestatus',
-    alias: ['autolike', 'likestatus'],
-    desc: 'Auto like all WhatsApp statuses',
-    react: '❤️',
+    alias: ['als'],
     category: 'owner',
-    ownerOnly: true,
-    async execute(m, { VoidMD, text }) {
-        const arg = text.toLowerCase().trim();
-        
-        if (arg === 'on') {
-            if (statusLikeListener) return m.reply('Autolike status already ON ❤️');
-            
-            await m.reply('Autolike status enabled ✅\nBot will heart all new statuses');
-            
-            statusLikeListener = async ({ messages }) => {
-                for (let msg of messages) {
-                    if (msg.key.remoteJid === 'status@broadcast' && !msg.key.fromMe) {
-                        try {
-                            await VoidMD.sendMessage(msg.key.remoteJid, {
-                                react: { text: '❤️', key: msg.key }
-                            });
-                            await new Promise(r => setTimeout(r, 1500)); // 1.5s delay per like
-                        } catch {}
-                    }
-                }
-            };
-            
-            VoidMD.ev.on('messages.upsert', statusLikeListener);
-            
-        } else if (arg === 'off') {
-            if (!statusLikeListener) return m.reply('Autolike status already OFF 💀');
-            VoidMD.ev.removeListener('messages.upsert', statusLikeListener);
-            statusLikeListener = null;
-            await m.reply('Autolike status disabled ❌');
-            
+    desc: 'Auto like status',
+    async execute(m, { VoidMD, args, owner, sender }) {
+        if (sender.split('@')[0]!== owner) {
+            return await VoidMD.sendMessage(m.key.remoteJid, { text: 'Only owner can use this' }, { quoted: m });
+        }
+
+        const action = args[0]?.toLowerCase(); // SAFE
+
+        if (!action) {
+            return await VoidMD.sendMessage(m.key.remoteJid, { 
+                text: `Usage:.autolikestatus on/off\nCurrent: ${global.autolikestatus? 'ON' : 'OFF'}` 
+            }, { quoted: m });
+        }
+
+        if (action === 'on') {
+            global.autolikestatus = true;
+            await VoidMD.sendMessage(m.key.remoteJid, { text: '✅ Auto Like Status enabled' }, { quoted: m });
+        } else if (action === 'off') {
+            global.autolikestatus = false;
+            await VoidMD.sendMessage(m.key.remoteJid, { text: '❌ Auto Like Status disabled' }, { quoted: m });
         } else {
-            await m.reply(`*Autolike Status:* ${statusLikeListener? 'ON ✅' : 'OFF ❌'}\n\nUsage:\n.autolikestatus on - Enable\n.autolikestatus off - Disable`);
+            await VoidMD.sendMessage(m.key.remoteJid, { text: 'Use.autolikestatus on/off' }, { quoted: m });
         }
     }
 }
