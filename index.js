@@ -10,11 +10,18 @@ const PORT = process.env.PORT || 3000;
 
 const commands = new Map();
 const prefix = '.';
-
 let latestQR = null;
 let botStatus = 'Starting...';
+let OWNER_NUMBER = null;
 
-// Load all commands
+// Auto-load owner if exists
+const OWNER_FILE = './owner.json';
+if (fs.existsSync(OWNER_FILE)) {
+    OWNER_NUMBER = JSON.parse(fs.readFileSync(OWNER_FILE)).owner;
+    console.log('Owner loaded:', OWNER_NUMBER);
+}
+
+// Load commands
 const commandsPath = path.join(__dirname, 'commands');
 if (fs.existsSync(commandsPath)) {
     fs.readdirSync(commandsPath).forEach(file => {
@@ -29,53 +36,18 @@ if (fs.existsSync(commandsPath)) {
             console.log(`Failed to load ${file}:`, e.message);
         }
     });
+} else {
+    console.log('ERROR: commands folder not found!');
 }
 
-// Serve QR on webpage
+// Web QR page
 app.get('/', async (req, res) => {
     if (botStatus === 'Connected') {
-        res.send(`
-            <html>
-                <head><title>VOID-MD</title></head>
-                <body style="background:#0a0a0a;color:#0f0;font-family:monospace;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;">
-                    <div style="text-align:center;">
-                        <h1>✅ VOID-MD Connected</h1>
-                        <p>Bot is online and ready</p>
-                        <p>Commands loaded: ${commands.size}</p>
-                    </div>
-                </body>
-            </html>
-        `);
+        res.send(`<html><body style="background:#0a0a0a;color:#0f0;font-family:monospace;text-align:center;padding-top:20vh;"><h1>✅ VOID-MD Connected</h1><p>Owner: ${OWNER_NUMBER}</p><p>Commands: ${commands.size}</p></body></html>`);
     } else if (latestQR) {
-        res.send(`
-            <html>
-                <head>
-                    <title>Scan QR - VOID-MD</title>
-                    <meta http-equiv="refresh" content="20">
-                </head>
-                <body style="background:#0a0a0a;color:#fff;font-family:monospace;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;">
-                    <div style="text-align:center;">
-                        <h1>🌟 VOID-MD WhatsApp Bot</h1>
-                        <p>Scan this QR with WhatsApp</p>
-                        <img src="${latestQR}" style="border:5px solid #0f0;border-radius:10px;">
-                        <p style="color:#888;">WhatsApp > Linked Devices > Link a device</p>
-                        <p style="color:#555;">Page refreshes every 20s</p>
-                    </div>
-                </body>
-            </html>
-        `);
+        res.send(`<html><head><meta http-equiv="refresh" content="20"></head><body style="background:#0a0a0a;color:#fff;font-family:monospace;text-align:center;padding-top:10vh;"><h1>🌟 Scan QR</h1><p style="color:#0f0;">You will become bot owner</p><img src="${latestQR}" style="border:5px solid #0f0;"><p>WhatsApp > Linked Devices</p></body></html>`);
     } else {
-        res.send(`
-            <html>
-                <body style="background:#0a0a0a;color:#fff;font-family:monospace;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;">
-                    <div style="text-align:center;">
-                        <h1>VOID-MD</h1>
-                        <p>Status: ${botStatus}</p>
-                        <p>Generating QR code...</p>
-                    </div>
-                </body>
-            </html>
-        `);
+        res.send(`<html><body style="background:#0a0a0a;color:#fff;font-family:monospace;text-align:center;padding-top:20vh;"><h1>VOID-MD</h1><p>${botStatus}</p></body></html>`);
     }
 });
 
@@ -89,7 +61,8 @@ async function startBot() {
         version,
         logger: pino({ level: 'silent' }),
         auth: state,
-        browser: ['VOID-MD', 'Chrome', '1.0.0']
+        browser: ['VOID-MD', 'Chrome', '1.0.0'],
+        getMessage: async () => { return { conversation: 'VOID-MD' } } // CRITICAL FOR COMMANDS
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -100,49 +73,62 @@ async function startBot() {
         if (qr) {
             latestQR = await qrcode.toDataURL(qr);
             botStatus = 'Waiting for QR scan';
-            console.log('QR generated. Open your Render URL to scan');
+            console.log('QR ready at your Render URL');
         }
 
         if (connection === 'close') {
             const shouldReconnect = lastDisconnect.error?.output?.statusCode!== DisconnectReason.loggedOut;
             botStatus = 'Disconnected';
             latestQR = null;
-            if (shouldReconnect) {
-                botStatus = 'Reconnecting...';
-                startBot();
-            } else {
-                botStatus = 'Logged out';
+            if (shouldReconnect) startBot();
+            else {
+                if (fs.existsSync(OWNER_FILE)) fs.unlinkSync(OWNER_FILE);
+                OWNER_NUMBER = null;
             }
         } else if (connection === 'open') {
             botStatus = 'Connected';
             latestQR = null;
-            console.log('Connected to WhatsApp');
+            
+            // AUTO-SET OWNER TO WHOEVER SCANS QR
+            if (!OWNER_NUMBER && sock.user?.id) {
+                OWNER_NUMBER = sock.user.id.split(':')[0];
+                fs.writeFileSync(OWNER_FILE, JSON.stringify({ owner: OWNER_NUMBER }));
+                console.log('OWNER SET TO:', OWNER_NUMBER);
+                await sock.sendMessage(OWNER_NUMBER + '@s.whatsapp.net', { 
+                    text: `✅ *You are now VOID-MD owner*\nNumber: ${OWNER_NUMBER}\n\nType ${prefix}ping to test` 
+                });
+            }
+            console.log('Connected. Owner:', OWNER_NUMBER);
         }
     });
 
-    sock.ev.on('messages.upsert', async ({ messages }) => {
+    // COMMAND HANDLER WITH DEBUG
+    sock.ev.on('messages.upsert', async ({ messages, type }) => {
+        if (type!== 'notify') return;
         const m = messages[0];
-        if (!m.message || m.key.fromMe) return;
+        if (!m.message) return;
+
+        const botNumber = sock.user?.id?.split(':')[0];
+        const sender = m.key.participant || m.key.remoteJid;
+        if (sender.split('@')[0] === botNumber) return; // ignore bot messages
 
         const body = m.message.conversation || m.message.extendedTextMessage?.text || m.message.imageMessage?.caption || '';
+        console.log('[MSG]', sender, ':', body);
+
         if (!body.startsWith(prefix)) return;
 
         const args = body.slice(prefix.length).trim().split(/ +/);
         const cmdName = args.shift().toLowerCase();
+        console.log('[CMD]', cmdName);
 
         const command = commands.get(cmdName) || [...commands.values()].find(c => c.alias?.includes(cmdName));
-        if (!command) return;
+        if (!command) {
+            console.log('[CMD] Not found:', cmdName);
+            return;
+        }
 
         try {
-            await sock.sendReadReceipt(m.key.remoteJid, m.key.participant || m.key.remoteJid, [m.key.id]);
-            if (command.react) await sock.sendMessage(m.key.remoteJid, { react: { text: command.react, key: m.key } });
-
-            await command.execute(m, {
-                VoidMD: sock,
-                commands: commands,
-                args: args,
-                prefix: prefix
-            });
+            await command.execute(m, { VoidMD: sock, commands, args, prefix, owner: OWNER_NUMBER });
         } catch (e) {
             console.log(`[CMD ERROR] ${cmdName}:`, e.message);
         }
