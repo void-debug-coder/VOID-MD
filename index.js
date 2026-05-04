@@ -18,14 +18,24 @@ const OWNER_FILE = './owner.json';
 
 // Load existing owner if file exists
 if (fs.existsSync(OWNER_FILE)) {
-    OWNER_NUMBER = JSON.parse(fs.readFileSync(OWNER_FILE)).owner;
-    console.log('Existing owner loaded:', OWNER_NUMBER);
+    try {
+        OWNER_NUMBER = JSON.parse(fs.readFileSync(OWNER_FILE)).owner;
+        console.log('Existing owner loaded:', OWNER_NUMBER);
+    } catch (e) {
+        console.log('Corrupt owner.json - deleting');
+        fs.unlinkSync(OWNER_FILE);
+    }
 }
 
 // Global settings
 global.anticall = false;
-global.autolikestatus = false;
+global.autoread = false;
 global.autoviewstatus = false;
+global.autolikestatus = false;
+global.autotyping = false;
+global.autorecording = false;
+global.alwaysonline = false;
+global.public = true;
 
 // Load commands
 const commandsPath = path.join(__dirname, 'commands');
@@ -36,22 +46,24 @@ if (fs.existsSync(commandsPath)) {
             const command = require(path.join(commandsPath, file));
             if (command.name) {
                 commands.set(command.name, command);
-                console.log(`Loaded command: ${command.name}`);
+                console.log(`Loaded: ${command.name}`);
             }
         } catch (e) {
-            console.log(`Failed to load ${file}:`, e.message);
+            console.log(`Failed ${file}:`, e.message);
         }
     });
 }
 
+// Keep alive for Render
 app.get('/ping', (req, res) => res.send('Bot alive'));
 setInterval(() => {
     require('https').get(`https://${process.env.RENDER_EXTERNAL_URL}/ping`).on('error', () => {});
 }, 240000);
 
+// Web UI
 app.get('/', async (req, res) => {
     if (botStatus === 'Connected') {
-        res.send(`<html><body style="background:#0a0a0a;color:#0f0;font-family:monospace;text-align:center;padding-top:20vh;"><h1>✅ VOID-MD Connected</h1><p>Owner: ${OWNER_NUMBER || 'Not set'}</p><p>Commands: ${commands.size}</p></body></html>`);
+        res.send(`<html><body style="background:#0a0a0a;color:#0f0;font-family:monospace;text-align:center;padding-top:20vh;"><h1>✅ VOID-MD Connected</h1><p>Owner: ${OWNER_NUMBER || 'Not Set'}</p><p>Commands: ${commands.size}</p><p>Mode: ${global.public? 'PUBLIC' : 'PRIVATE'}</p></body></html>`);
     } else if (latestQR) {
         res.send(`<html><head><meta http-equiv="refresh" content="20"></head><body style="background:#0a0a0a;color:#fff;font-family:monospace;text-align:center;padding-top:10vh;"><h1>🌟 Scan QR to Become Owner</h1><p style="color:#0f0;">First scan sets you as bot owner</p><img src="${latestQR}" style="border:5px solid #0f0;"><p>WhatsApp > Linked Devices</p></body></html>`);
     } else {
@@ -76,7 +88,7 @@ async function startBot() {
             auth: state,
             browser: ['VOID-MD', 'Chrome', '1.0.0'],
             getMessage: async () => { return { conversation: 'VOID-MD' } },
-            markOnlineOnConnect: true,
+            markOnlineOnConnect: global.alwaysonline,
             syncFullHistory: false,
             fireInitQueries: false
         });
@@ -108,19 +120,48 @@ async function startBot() {
             } else if (connection === 'open') {
                 botStatus = 'Connected';
                 latestQR = null;
-                
+
                 // AUTO-SET OWNER: First person to connect becomes owner
                 if (!OWNER_NUMBER && sock.user?.id) {
-                    // LID SAFE: Strip everything except digits
                     OWNER_NUMBER = sock.user.id.replace(/[^0-9]/g, '');
                     fs.writeFileSync(OWNER_FILE, JSON.stringify({ owner: OWNER_NUMBER }));
                     console.log('NEW OWNER SET:', OWNER_NUMBER);
-                    
+
                     await sock.sendMessage(OWNER_NUMBER + '@s.whatsapp.net', {
-                        text: `✅ *You are now VOID-MD owner*\nNumber: ${OWNER_NUMBER}\n\nType ${prefix}ping to test\nType ${prefix}anticall on to enable`
+                        text: `✅ *You are now VOID-MD owner*\nNumber: ${OWNER_NUMBER}\n\nType ${prefix}ping to test\nType ${prefix}menu for commands`
                     }).catch(e => console.log('Failed to send owner msg:', e.message));
                 }
                 console.log('Connected. Owner:', OWNER_NUMBER);
+            }
+        });
+
+        // Anti-call handler
+        sock.ev.on('call', async (calls) => {
+            if (!global.anticall) return;
+            for (let call of calls) {
+                if (call.status === 'offer') {
+                    await sock.rejectCall(call.id, call.from);
+                    await sock.sendMessage(call.from, {
+                        text: '📞 *Anti-Call is active*\n\nCalls are not allowed.'
+                    });
+                }
+            }
+        });
+
+        // Auto-view status
+        sock.ev.on('messages.upsert', async ({ messages }) => {
+            if (!global.autoviewstatus) return;
+            for (let msg of messages) {
+                if (msg.key.remoteJid === 'status@broadcast') {
+                    try {
+                        await sock.readMessages([msg.key]);
+                        if (global.autolikestatus) {
+                            await sock.sendMessage(msg.key.remoteJid, {
+                                react: { text: '💚', key: msg.key }
+                            });
+                        }
+                    } catch {}
+                }
             }
         });
 
@@ -137,18 +178,26 @@ async function startBot() {
 
             if (senderNum === botNumber) return;
 
+            // Auto-read
+            if (global.autoread &&!m.key.fromMe && m.key.remoteJid!== 'status@broadcast') {
+                try {
+                    await sock.readMessages([m.key]);
+                } catch {}
+            }
+
             const body = m.message.conversation
                 || m.message.extendedTextMessage?.text
                 || m.message.imageMessage?.caption
                 || m.message.videoMessage?.caption
                 || '';
-            console.log('[MSG]', sender, ':', body);
 
             if (!body.startsWith(prefix)) return;
 
+            // Private mode check
+            if (!global.public && senderNum!== OWNER_NUMBER) return;
+
             const args = body.slice(prefix.length).trim().split(/ +/);
             const cmdName = args.shift().toLowerCase();
-            console.log('[CMD]', cmdName);
 
             const command = commands.get(cmdName) || [...commands.values()].find(c => c.alias?.includes(cmdName));
             if (!command) return;
@@ -169,9 +218,8 @@ async function startBot() {
             } catch (e) {
                 console.log(`[CMD ERROR] ${cmdName}:`, e.message);
                 await sock.sendMessage(m.key.remoteJid, {
-                    react: { text: '❌', key: m.key }
-                }).catch(() => {});
-                await sock.sendMessage(m.key.remoteJid, { text: `Error: ${e.message}` }, { quoted: m }).catch(() => {});
+                    text: `Error: ${e.message}`
+                }, { quoted: m }).catch(() => {});
             }
         });
 
