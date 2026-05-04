@@ -6,12 +6,7 @@
   "scripts": {
     "start": "node index.js"
   },
-  "keywords": [
-    "whatsapp",
-    "bot",
-    "md",
-    "baileys"
-  ],
+  "keywords": ["whatsapp", "bot", "md", "baileys"],
   "author": "Void Dev",
   "license": "MIT",
   "dependencies": {
@@ -20,7 +15,8 @@
     "express": "^4.18.2",
     "qrcode": "^1.5.3",
     "qrcode-terminal": "^0.12.0",
-    "pino": "^8.17.0"
+    "pino": "^8.17.0",
+    "yt-search": "^2.11.1"
   },
   "engines": {
     "node": ">=18.0.0"
