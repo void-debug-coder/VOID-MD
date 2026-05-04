@@ -1,22 +1,12 @@
-const axios = require('axios');
-
 module.exports = {
     name: 'meme',
     alias: ['memes'],
-    desc: 'Random meme',
-    react: '😂',
+    react: '🤣',
     category: 'fun',
+    desc: 'Send random meme',
     async execute(m, { VoidMD }) {
-        await m.react('⏳');
-        try {
-            const { data } = await axios.get('https://api.akuari.my.id/random/meme');
-            await VoidMD.sendMessage(m.chat, {
-                image: { url: data.respon.url },
-                caption: `😂 *${data.respon.title}*`
-            }, { quoted: m });
-            await m.react('✅');
-        } catch (e) {
-            await m.reply('Meme API failed 💀');
-        }
+        await VoidMD.sendMessage(m.key.remoteJid, {
+            text: 'Here\'s a meme 😂\n\nhttps://i.imgflip.com/1bij.jpg'
+        }, { quoted: m });
     }
 }
