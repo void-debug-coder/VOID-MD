@@ -3,39 +3,64 @@ let readListener = null;
 module.exports = {
     name: 'autoread',
     alias: ['ar', 'readall'],
-    desc: 'Auto mark all messages as read',
     react: '📖',
     category: 'owner',
-    ownerOnly: true,
-    async execute(m, { VoidMD, text }) {
-        const arg = text.toLowerCase().trim();
+    desc: 'Auto mark all messages as read',
+    async execute(m, { VoidMD, args, owner, sender }) {
+        // LID SAFE OWNER CHECK
+        const senderNum = sender.replace(/[^0-9]/g, '');
+        if (senderNum!== owner) {
+            return await VoidMD.sendMessage(m.key.remoteJid, { 
+                text: 'Only owner can use this' 
+            }, { quoted: m });
+        }
+
+        const arg = args[0]?.toLowerCase();
         
         if (arg === 'on') {
-            if (readListener) return m.reply('Autoread already ON 📖');
+            if (readListener) {
+                return await VoidMD.sendMessage(m.key.remoteJid, { 
+                    text: 'Autoread already ON 📖' 
+                }, { quoted: m });
+            }
             
-            await m.reply('Autoread enabled ✅\nBot will mark all messages as read');
+            await VoidMD.sendMessage(m.key.remoteJid, { 
+                text: 'Autoread enabled ✅\nBot will mark all messages as read' 
+            }, { quoted: m });
             
             readListener = async ({ messages }) => {
                 for (let msg of messages) {
-                    if (!msg.key.fromMe && msg.key.remoteJid !== 'status@broadcast') {
+                    if (!msg.key.fromMe && msg.key.remoteJid!== 'status@broadcast') {
                         try {
                             await VoidMD.readMessages([msg.key]);
-                            await new Promise(r => setTimeout(r, 800)); // 800ms delay
-                        } catch {}
+                            await new Promise(r => setTimeout(r, 800));
+                        } catch (e) {
+                            console.log('[AUTOREAD ERROR]', e.message);
+                        }
                     }
                 }
             };
             
             VoidMD.ev.on('messages.upsert', readListener);
+            global.autoread = true;
             
         } else if (arg === 'off') {
-            if (!readListener) return m.reply('Autoread already OFF 💀');
-            VoidMD.ev.removeListener('messages.upsert', readListener);
+            if (!readListener) {
+                return await VoidMD.sendMessage(m.key.remoteJid, { 
+                    text: 'Autoread already OFF 💀' 
+                }, { quoted: m });
+            }
+            VoidMD.ev.off('messages.upsert', readListener);
             readListener = null;
-            await m.reply('Autoread disabled ❌');
+            global.autoread = false;
+            await VoidMD.sendMessage(m.key.remoteJid, { 
+                text: 'Autoread disabled ❌' 
+            }, { quoted: m });
             
         } else {
-            await m.reply(`*Autoread:* ${readListener? 'ON ✅' : 'OFF ❌'}\n\nUsage:\n.autoread on - Enable\n.autoread off - Disable`);
+            await VoidMD.sendMessage(m.key.remoteJid, { 
+                text: `*Autoread:* ${readListener? 'ON ✅' : 'OFF ❌'}\n\nUsage:\n.autoread on - Enable\n.autoread off - Disable` 
+            }, { quoted: m });
         }
     }
 }
