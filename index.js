@@ -20,6 +20,11 @@ if (fs.existsSync(OWNER_FILE)) {
     console.log('Owner loaded:', OWNER_NUMBER);
 }
 
+// Global settings
+global.anticall = false;
+global.autolikestatus = false;
+global.autoviewstatus = false;
+
 // Load commands
 const commandsPath = path.join(__dirname, 'commands');
 if (fs.existsSync(commandsPath)) {
@@ -35,17 +40,13 @@ if (fs.existsSync(commandsPath)) {
             console.log(`Failed to load ${file}:`, e.message);
         }
     });
-} else {
-    console.log('ERROR: commands folder not found!');
 }
 
-// Keep Render alive
 app.get('/ping', (req, res) => res.send('Bot alive'));
 setInterval(() => {
     require('https').get(`https://${process.env.RENDER_EXTERNAL_URL}/ping`).on('error', () => {});
 }, 240000);
 
-// Web QR page
 app.get('/', async (req, res) => {
     if (botStatus === 'Connected') {
         res.send(`<html><body style="background:#0a0a0a;color:#0f0;font-family:monospace;text-align:center;padding-top:20vh;"><h1>✅ VOID-MD Connected</h1><p>Owner: ${OWNER_NUMBER}</p><p>Commands: ${commands.size}</p></body></html>`);
@@ -61,11 +62,7 @@ app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 async function startBot() {
     try {
         console.log('[BOT] Starting Baileys...');
-
-        if (!fs.existsSync('./session')) {
-            fs.mkdirSync('./session');
-            console.log('[BOT] Created session folder');
-        }
+        if (!fs.existsSync('./session')) fs.mkdirSync('./session');
 
         const { state, saveCreds } = await useMultiFileAuthState('./session');
         const { version } = await fetchLatestBaileysVersion();
@@ -77,7 +74,7 @@ async function startBot() {
             auth: state,
             browser: ['VOID-MD', 'Chrome', '1.0.0'],
             getMessage: async () => { return { conversation: 'VOID-MD' } },
-            markOnlineOnConnect: true, // CRITICAL: Forces messages to come through
+            markOnlineOnConnect: true,
             syncFullHistory: false,
             fireInitQueries: false
         });
@@ -98,7 +95,6 @@ async function startBot() {
                 const shouldReconnect = lastDisconnect?.error?.output?.statusCode!== DisconnectReason.loggedOut;
                 botStatus = 'Disconnected';
                 latestQR = null;
-                console.log('[BOT] Connection closed. Reconnect:', shouldReconnect);
                 if (shouldReconnect) setTimeout(startBot, 5000);
                 else {
                     if (fs.existsSync(OWNER_FILE)) fs.unlinkSync(OWNER_FILE);
@@ -107,9 +103,8 @@ async function startBot() {
             } else if (connection === 'open') {
                 botStatus = 'Connected';
                 latestQR = null;
-
                 if (!OWNER_NUMBER && sock.user?.id) {
-                    OWNER_NUMBER = sock.user.id.split(':')[0];
+                    OWNER_NUMBER = sock.user.id.split(':')[0].split('@')[0];
                     fs.writeFileSync(OWNER_FILE, JSON.stringify({ owner: OWNER_NUMBER }));
                     console.log('OWNER SET TO:', OWNER_NUMBER);
                     await sock.sendMessage(OWNER_NUMBER + '@s.whatsapp.net', {
@@ -121,14 +116,14 @@ async function startBot() {
         });
 
         sock.ev.on('messages.upsert', async ({ messages, type }) => {
-            console.log('RAW EVENT:', type); // Debug: remove after working
             if (type!== 'notify') return;
             const m = messages[0];
             if (!m.message) return;
 
-            const botNumber = sock.user?.id?.split(':')[0];
-            const sender = m.key.participant || m.key.remoteJid;
-            if (sender.split('@')[0] === botNumber) return;
+            const botNumber = sock.user?.id?.split(':')[0].split('@')[0];
+            let sender = m.key.participant || m.key.remoteJid;
+            const senderNum = sender.split('@')[0].split(':')[0];
+            if (senderNum === botNumber) return;
 
             const body = m.message.conversation
                 || m.message.extendedTextMessage?.text
@@ -144,12 +139,14 @@ async function startBot() {
             console.log('[CMD]', cmdName);
 
             const command = commands.get(cmdName) || [...commands.values()].find(c => c.alias?.includes(cmdName));
-            if (!command) {
-                console.log('[CMD] Not found:', cmdName);
-                return;
-            }
+            if (!command) return;
 
             try {
+                // GLOBAL AUTO REACT - uses command.react or default ⚡
+                await sock.sendMessage(m.key.remoteJid, {
+                    react: { text: command.react || '⚡', key: m.key }
+                }).catch(() => {});
+
                 await command.execute(m, {
                     VoidMD: sock,
                     commands,
@@ -160,13 +157,15 @@ async function startBot() {
                 });
             } catch (e) {
                 console.log(`[CMD ERROR] ${cmdName}:`, e.message);
+                await sock.sendMessage(m.key.remoteJid, {
+                    react: { text: '❌', key: m.key }
+                }).catch(() => {});
                 await sock.sendMessage(m.key.remoteJid, { text: `Error: ${e.message}` }, { quoted: m }).catch(() => {});
             }
         });
 
     } catch (error) {
         console.log('[BOT CRASH]', error.message);
-        console.log(error.stack);
         botStatus = 'Crashed: ' + error.message;
         setTimeout(startBot, 10000);
     }
