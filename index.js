@@ -104,6 +104,7 @@ async function startBot() {
                 botStatus = 'Connected';
                 latestQR = null;
                 if (!OWNER_NUMBER && sock.user?.id) {
+                    // LID SAFE: Strip :xx and @lid
                     OWNER_NUMBER = sock.user.id.split(':')[0].split('@')[0];
                     fs.writeFileSync(OWNER_FILE, JSON.stringify({ owner: OWNER_NUMBER }));
                     console.log('OWNER SET TO:', OWNER_NUMBER);
@@ -122,7 +123,11 @@ async function startBot() {
 
             const botNumber = sock.user?.id?.split(':')[0].split('@')[0];
             let sender = m.key.participant || m.key.remoteJid;
+            // LID SAFE: 254114145528:12@lid → 254114145528
             const senderNum = sender.split('@')[0].split(':')[0];
+            
+            console.log('[OWNER CHECK] Sender:', senderNum, '| Owner:', OWNER_NUMBER, '| Bot:', botNumber);
+
             if (senderNum === botNumber) return;
 
             const body = m.message.conversation
@@ -142,7 +147,7 @@ async function startBot() {
             if (!command) return;
 
             try {
-                // GLOBAL AUTO REACT - uses command.react or default ⚡
+                // Global auto react
                 await sock.sendMessage(m.key.remoteJid, {
                     react: { text: command.react || '⚡', key: m.key }
                 }).catch(() => {});
@@ -153,7 +158,7 @@ async function startBot() {
                     args,
                     prefix,
                     owner: OWNER_NUMBER,
-                    sender: sender
+                    sender: sender // Pass full JID for command to parse
                 });
             } catch (e) {
                 console.log(`[CMD ERROR] ${cmdName}:`, e.message);
