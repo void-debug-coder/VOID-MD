@@ -15,9 +15,11 @@ let botStatus = 'Starting...';
 let OWNER_NUMBER = null;
 
 const OWNER_FILE = './owner.json';
+
+// Load existing owner if file exists
 if (fs.existsSync(OWNER_FILE)) {
     OWNER_NUMBER = JSON.parse(fs.readFileSync(OWNER_FILE)).owner;
-    console.log('Owner loaded:', OWNER_NUMBER);
+    console.log('Existing owner loaded:', OWNER_NUMBER);
 }
 
 // Global settings
@@ -49,9 +51,9 @@ setInterval(() => {
 
 app.get('/', async (req, res) => {
     if (botStatus === 'Connected') {
-        res.send(`<html><body style="background:#0a0a0a;color:#0f0;font-family:monospace;text-align:center;padding-top:20vh;"><h1>✅ VOID-MD Connected</h1><p>Owner: ${OWNER_NUMBER}</p><p>Commands: ${commands.size}</p></body></html>`);
+        res.send(`<html><body style="background:#0a0a0a;color:#0f0;font-family:monospace;text-align:center;padding-top:20vh;"><h1>✅ VOID-MD Connected</h1><p>Owner: ${OWNER_NUMBER || 'Not set'}</p><p>Commands: ${commands.size}</p></body></html>`);
     } else if (latestQR) {
-        res.send(`<html><head><meta http-equiv="refresh" content="20"></head><body style="background:#0a0a0a;color:#fff;font-family:monospace;text-align:center;padding-top:10vh;"><h1>🌟 Scan QR</h1><p style="color:#0f0;">You will become bot owner</p><img src="${latestQR}" style="border:5px solid #0f0;"><p>WhatsApp > Linked Devices</p></body></html>`);
+        res.send(`<html><head><meta http-equiv="refresh" content="20"></head><body style="background:#0a0a0a;color:#fff;font-family:monospace;text-align:center;padding-top:10vh;"><h1>🌟 Scan QR to Become Owner</h1><p style="color:#0f0;">First scan sets you as bot owner</p><img src="${latestQR}" style="border:5px solid #0f0;"><p>WhatsApp > Linked Devices</p></body></html>`);
     } else {
         res.send(`<html><body style="background:#0a0a0a;color:#fff;font-family:monospace;text-align:center;padding-top:20vh;"><h1>VOID-MD</h1><p>${botStatus}</p></body></html>`);
     }
@@ -88,29 +90,35 @@ async function startBot() {
             if (qr) {
                 latestQR = await qrcode.toDataURL(qr);
                 botStatus = 'Waiting for QR scan';
-                console.log('QR ready at your Render URL');
+                console.log('QR ready - scan to become owner');
             }
 
             if (connection === 'close') {
                 const shouldReconnect = lastDisconnect?.error?.output?.statusCode!== DisconnectReason.loggedOut;
                 botStatus = 'Disconnected';
                 latestQR = null;
-                if (shouldReconnect) setTimeout(startBot, 5000);
-                else {
+                if (shouldReconnect) {
+                    setTimeout(startBot, 5000);
+                } else {
+                    // Logged out - delete owner file
                     if (fs.existsSync(OWNER_FILE)) fs.unlinkSync(OWNER_FILE);
                     OWNER_NUMBER = null;
+                    console.log('Logged out - owner reset');
                 }
             } else if (connection === 'open') {
                 botStatus = 'Connected';
                 latestQR = null;
+                
+                // AUTO-SET OWNER: First person to connect becomes owner
                 if (!OWNER_NUMBER && sock.user?.id) {
-                    // LID SAFE: Strip :xx and @lid
-                    OWNER_NUMBER = sock.user.id.split(':')[0].split('@')[0];
+                    // LID SAFE: Strip everything except digits
+                    OWNER_NUMBER = sock.user.id.replace(/[^0-9]/g, '');
                     fs.writeFileSync(OWNER_FILE, JSON.stringify({ owner: OWNER_NUMBER }));
-                    console.log('OWNER SET TO:', OWNER_NUMBER);
+                    console.log('NEW OWNER SET:', OWNER_NUMBER);
+                    
                     await sock.sendMessage(OWNER_NUMBER + '@s.whatsapp.net', {
-                        text: `✅ *You are now VOID-MD owner*\nNumber: ${OWNER_NUMBER}\n\nType ${prefix}ping to test`
-                    }).catch(() => {});
+                        text: `✅ *You are now VOID-MD owner*\nNumber: ${OWNER_NUMBER}\n\nType ${prefix}ping to test\nType ${prefix}anticall on to enable`
+                    }).catch(e => console.log('Failed to send owner msg:', e.message));
                 }
                 console.log('Connected. Owner:', OWNER_NUMBER);
             }
@@ -121,11 +129,10 @@ async function startBot() {
             const m = messages[0];
             if (!m.message) return;
 
-            const botNumber = sock.user?.id?.split(':')[0].split('@')[0];
+            const botNumber = sock.user?.id?.replace(/[^0-9]/g, '');
             let sender = m.key.participant || m.key.remoteJid;
-            // LID SAFE: 254114145528:12@lid → 254114145528
-            const senderNum = sender.split('@')[0].split(':')[0];
-            
+            const senderNum = sender.replace(/[^0-9]/g, '');
+
             console.log('[OWNER CHECK] Sender:', senderNum, '| Owner:', OWNER_NUMBER, '| Bot:', botNumber);
 
             if (senderNum === botNumber) return;
@@ -147,7 +154,6 @@ async function startBot() {
             if (!command) return;
 
             try {
-                // Global auto react
                 await sock.sendMessage(m.key.remoteJid, {
                     react: { text: command.react || '⚡', key: m.key }
                 }).catch(() => {});
@@ -158,7 +164,7 @@ async function startBot() {
                     args,
                     prefix,
                     owner: OWNER_NUMBER,
-                    sender: sender // Pass full JID for command to parse
+                    sender: sender
                 });
             } catch (e) {
                 console.log(`[CMD ERROR] ${cmdName}:`, e.message);
