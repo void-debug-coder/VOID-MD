@@ -1,11 +1,13 @@
 module.exports = {
     name: 'ping',
-    desc: 'Check bot response time',
-    category: 'general',
-    async execute({ reply }) {
-        const start = Date.now()
-        await reply('Pong!')
-        const end = Date.now()
-        reply(`Response: ${end - start}ms 💀`)
+    alias: ['p'],
+    react: '🏓',
+    category: 'core',
+    desc: 'Check bot response',
+    async execute(m, { VoidMD }) {
+        const start = Date.now();
+        await VoidMD.sendMessage(m.key.remoteJid, { text: 'Pinging...' }, { quoted: m });
+        const end = Date.now();
+        await VoidMD.sendMessage(m.key.remoteJid, { text: `Pong! ${end - start}ms` });
     }
 }
