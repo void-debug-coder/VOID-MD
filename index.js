@@ -1,231 +1,311 @@
-const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
-const pino = require('pino');
-const fs = require('fs');
-const path = require('path');
-const express = require('express');
-const qrcode = require('qrcode');
+require('./settings')
+const { Boom } = require('@hapi/boom')
+const fs = require('fs')
+const chalk = require('chalk')
+const path = require('path')
+const { smsg, sleep, delay } = require('./lib/functions')
+const {
+    default: makeWASocket,
+    useMultiFileAuthState,
+    DisconnectReason,
+    fetchLatestBaileysVersion,
+    jidDecode,
+    jidNormalizedUser,
+    makeCacheableSignalKeyStore
+} = require("@whiskeysockets/baileys")
+const NodeCache = require("node-cache")
+const pino = require("pino")
+const readline = require("readline")
+const { rmSync } = require('fs')
+const express = require('express')
+const qrcode = require('qrcode')
+const store = require('./lib/store')
+const settings = require('./settings')
 
-const app = express();
-const PORT = process.env.PORT || 3000;
+const app = express()
+const PORT = process.env.PORT || 3000
+const commands = new Map()
+let latestQR = null
+let botStatus = 'Starting...'
 
-const commands = new Map();
-const prefix = '.';
-let latestQR = null;
-let botStatus = 'Starting...';
+// Auto-save store
+setInterval(() => store.writeToFile(), settings.storeWriteInterval)
 
-// HARDCODED OWNER FOR FREE TIER - CHANGE THIS TO YOUR NUMBER
-let OWNER_NUMBER = '254112843071'; 
-const OWNER_FILE = './owner.json';
+// RAM Monitor + Auto Restart
+setInterval(() => {
+    const used = process.memoryUsage().rss / 1024 / 1024
+    if (used > 400) {
+        console.log('⚠️ RAM >400MB, restarting...')
+        process.exit(1)
+    }
+}, 30000)
 
-// Try loading from file, but fallback to hardcoded if missing
+// GC every 1 min
+setInterval(() => {
+    if (global.gc) {
+        global.gc()
+        console.log('🧹 GC completed')
+    }
+}, 60000)
+
+// Load owner
+let OWNER_NUMBER = settings.ownerNumber
+const OWNER_FILE = './data/owner.json'
 if (fs.existsSync(OWNER_FILE)) {
     try {
-        OWNER_NUMBER = JSON.parse(fs.readFileSync(OWNER_FILE)).owner;
-        console.log('[OWNER LOAD] From file:', OWNER_NUMBER);
-    } catch (e) {
-        console.log('[OWNER LOAD] Corrupt file, using hardcoded:', OWNER_NUMBER);
-    }
-} else {
-    console.log('[OWNER LOAD] No file, using hardcoded:', OWNER_NUMBER);
+        OWNER_NUMBER = JSON.parse(fs.readFileSync(OWNER_FILE)).owner
+    } catch {}
 }
 
-// Global settings
-global.anticall = false;
-global.autoread = false;
-global.autoviewstatus = false;
-global.autolikestatus = false;
-global.autotyping = false;
-global.autorecording = false;
-global.alwaysonline = false;
-global.public = true;
+global.botname = settings.botName
+global.themeemoji = settings.themeEmoji
+global.owner = OWNER_NUMBER
+global.prefix = settings.prefix
 
-// Load commands
-const commandsPath = path.join(__dirname, 'commands');
-if (fs.existsSync(commandsPath)) {
-    fs.readdirSync(commandsPath).forEach(file => {
-        if (!file.endsWith('.js')) return;
-        try {
-            const command = require(path.join(commandsPath, file));
-            if (command.name) {
-                commands.set(command.name, command);
-                console.log(`[CMD LOAD] Loaded: ${command.name}`);
+// Global toggles
+global.anticall = false
+global.autoread = false
+global.autoviewstatus = false
+global.autolikestatus = false
+global.autotyping = false
+global.autorecording = false
+global.alwaysonline = false
+global.public = true
+
+// Load commands recursively
+const loadCommands = (dir) => {
+    fs.readdirSync(dir).forEach(file => {
+        const filePath = path.join(dir, file)
+        if (fs.statSync(filePath).isDirectory()) {
+            loadCommands(filePath)
+        } else if (file.endsWith('.js')) {
+            try {
+                const command = require(filePath)
+                if (command.name) {
+                    commands.set(command.name, command)
+                    console.log(`[CMD] ${command.name}`)
+                }
+            } catch (e) {
+                console.log(`[CMD ERROR] ${file}:`, e.message)
             }
-        } catch (e) {
-            console.log(`[CMD LOAD] Failed ${file}:`, e.message);
         }
-    });
+    })
 }
+if (fs.existsSync('./commands')) loadCommands('./commands')
 
-// Keep alive for Render
-app.get('/ping', (req, res) => res.send('Bot alive'));
+// Keep alive
+app.get('/ping', (req, res) => res.send('Alive'))
 setInterval(() => {
     if (process.env.RENDER_EXTERNAL_URL) {
-        require('https').get(`https://${process.env.RENDER_EXTERNAL_URL}/ping`).on('error', () => {});
+        require('https').get(`${process.env.RENDER_EXTERNAL_URL}/ping`).on('error', () => {})
     }
-}, 240000);
+}, 240000)
 
 // Web UI
 app.get('/', async (req, res) => {
     if (botStatus === 'Connected') {
-        res.send(`<html><body style="background:#0a0a0a;color:#0f0;font-family:monospace;text-align:center;padding-top:20vh;"><h1>✅ VOID-MD Connected</h1><p>Owner: ${OWNER_NUMBER}</p><p>Commands: ${commands.size}</p><p>Mode: ${global.public? 'PUBLIC' : 'PRIVATE'}</p></body></html>`);
+        res.send(`<html><body style="background:#000;color:#0f0;font-family:monospace;text-align:center;padding-top:15vh;"><h1>✅ ${global.botname} ONLINE</h1><p>Owner: ${OWNER_NUMBER}</p><p>Commands: ${commands.size}</p><p>Mode: ${global.public? 'PUBLIC':'PRIVATE'}</p><p>RAM: ${(process.memoryUsage().rss/1024/1024).toFixed(2)}MB</p><p>Prefix: ${global.prefix}</p></body></html>`)
     } else if (latestQR) {
-        res.send(`<html><head><meta http-equiv="refresh" content="20"></head><body style="background:#0a0a0a;color:#fff;font-family:monospace;text-align:center;padding-top:10vh;"><h1>🌟 Scan QR</h1><img src="${latestQR}" style="border:5px solid #0f0;"><p>WhatsApp > Linked Devices</p></body></html>`);
+        res.send(`<html><head><meta http-equiv="refresh" content="20"></head><body style="background:#000;color:#fff;font-family:monospace;text-align:center;padding-top:10vh;"><h1>🌟 Scan QR Code</h1><img src="${latestQR}" style="border:5px solid #0f0;width:300px;"><p>WhatsApp > Linked Devices</p></body></html>`)
     } else {
-        res.send(`<html><body style="background:#0a0a0a;color:#fff;font-family:monospace;text-align:center;padding-top:20vh;"><h1>VOID-MD</h1><p>${botStatus}</p></body></html>`);
+        res.send(`<html><body style="background:#000;color:#fff;font-family:monospace;text-align:center;padding-top:20vh;"><h1>${global.botname}</h1><p>${botStatus}</p></body></html>`)
     }
-});
+})
 
-app.listen(PORT, () => console.log(`[SERVER] Running on port ${PORT}`));
+app.listen(PORT, () => console.log(`[SERVER] Port ${PORT}`))
+
+// Pairing code setup
+const pairingCode = process.argv.includes("--pairing-code")
+const rl = process.stdin.isTTY? readline.createInterface({ input: process.stdin, output: process.stdout }) : null
+const question = (text) => rl? new Promise(r => rl.question(text, r)) : Promise.resolve(OWNER_NUMBER)
 
 async function startBot() {
     try {
-        console.log('[BOT] Starting Baileys...');
-        if (!fs.existsSync('./session')) fs.mkdirSync('./session');
+        console.log(`[BOT] Starting ${global.botname}...`)
+        if (!fs.existsSync('./session')) fs.mkdirSync('./session')
+        if (!fs.existsSync('./data')) fs.mkdirSync('./data')
 
-        const { state, saveCreds } = await useMultiFileAuthState('./session');
-        const { version } = await fetchLatestBaileysVersion();
-        console.log('[BOT] Baileys version:', version);
+        const { state, saveCreds } = await useMultiFileAuthState('./session')
+        const { version } = await fetchLatestBaileysVersion()
+        const msgRetryCounterCache = new NodeCache()
 
-        const sock = makeWASocket({
+        const VoidMD = makeWASocket({
             version,
             logger: pino({ level: 'silent' }),
-            auth: state,
-            browser: ['VOID-MD', 'Chrome', '1.0.0'],
-            getMessage: async () => { return { conversation: 'VOID-MD' } },
+            printQRInTerminal:!pairingCode,
+            browser: [global.botname, "Chrome", settings.version],
+            auth: {
+                creds: state.creds,
+                keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" }).child({ level: "fatal" }))
+            },
             markOnlineOnConnect: global.alwaysonline,
-            syncFullHistory: false,
-            fireInitQueries: false
-        });
+            generateHighQualityLinkPreview: true,
+            getMessage: async (key) => {
+                return store.loadMessage(jidNormalizedUser(key.remoteJid), key.id)?.message || ""
+            },
+            msgRetryCounterCache
+        })
 
-        sock.ev.on('creds.update', saveCreds);
+        store.bind(VoidMD.ev)
 
-        sock.ev.on('connection.update', async (update) => {
-            const { connection, lastDisconnect, qr } = update;
-            console.log('[CONNECTION]', connection);
+        VoidMD.decodeJid = (jid) => {
+            if (!jid) return jid
+            if (/:\d+@/gi.test(jid)) {
+                let decode = jidDecode(jid) || {}
+                return decode.user && decode.server && decode.user + '@' + decode.server || jid
+            } else return jid
+        }
+
+        VoidMD.ev.on('creds.update', saveCreds)
+
+        // Pairing Code
+        if (pairingCode &&!VoidMD.authState.creds.registered) {
+            let phoneNumber = await question(chalk.bgBlack(chalk.greenBright(`Enter WhatsApp number with country code:\nExample: 254712345678 : `)))
+            phoneNumber = phoneNumber.replace(/[^0-9]/g, '')
+
+            setTimeout(async () => {
+                try {
+                    let code = await VoidMD.requestPairingCode(phoneNumber, settings.pairCode)
+                    code = code?.match(/.{1,4}/g)?.join("-") || code
+                    console.log(chalk.black(chalk.bgGreen(`Pair Code: `)), chalk.black(chalk.white(code)))
+                } catch (e) {
+                    console.log(chalk.red('Pair code failed:', e.message))
+                }
+            }, 3000)
+        }
+
+        // Connection
+        VoidMD.ev.on('connection.update', async (update) => {
+            const { connection, lastDisconnect, qr } = update
 
             if (qr) {
-                latestQR = await qrcode.toDataURL(qr);
-                botStatus = 'Waiting for QR scan';
-                console.log('[QR] Ready');
+                latestQR = await qrcode.toDataURL(qr)
+                botStatus = 'Scan QR'
+                console.log('[QR] Ready at /')
             }
 
             if (connection === 'close') {
-                const shouldReconnect = lastDisconnect?.error?.output?.statusCode!== DisconnectReason.loggedOut;
-                botStatus = 'Disconnected';
-                latestQR = null;
-                if (shouldReconnect) {
-                    console.log('[RECONNECT] Reconnecting in 5s...');
-                    setTimeout(startBot, 5000);
+                const code = lastDisconnect?.error?.output?.statusCode
+                botStatus = 'Disconnected'
+                latestQR = null
+                if (code === DisconnectReason.loggedOut || code === 401) {
+                    try { rmSync('./session', { recursive: true, force: true }) } catch {}
+                    console.log(chalk.red('Logged out. Restarting...'))
+                    setTimeout(startBot, 3000)
                 } else {
-                    console.log('[LOGOUT] Logged out');
+                    console.log('[RECONNECT] 5s...')
+                    setTimeout(startBot, 5000)
                 }
             } else if (connection === 'open') {
-                botStatus = 'Connected';
-                latestQR = null;
-                console.log('[READY] Connected. Owner:', OWNER_NUMBER);
-                
+                botStatus = 'Connected'
+                latestQR = null
+                console.log(chalk.green(`✅ ${global.botname} Connected: ${VoidMD.user.id}`))
+
+                // Auto follow newsletters
+                for (let jid of settings.newsletterJids) {
+                    try { await VoidMD.newsletterFollow(jid) } catch {}
+                }
+
+                // Save owner
+                fs.writeFileSync(OWNER_FILE, JSON.stringify({ owner: OWNER_NUMBER }))
+
+                // Startup msg
+                const botJid = VoidMD.user.id.split(':')[0] + '@s.whatsapp.net'
+                await VoidMD.sendMessage(botJid, {
+                    text: `*${global.themeemoji} ${global.botname} ACTIVE*\n\n*Time:* ${new Date().toLocaleString()}\n*RAM:* ${(process.memoryUsage().rss/1024/1024).toFixed(2)}MB\n*Mode:* ${global.public? 'Public':'Private'}\n*Prefix:* ${global.prefix}\n\n*Update:* ${settings.channels.update}`
+                })
+
+                console.log(chalk.cyan(`< ========== ${global.botname} ${settings.version} ========== >`))
+            }
+        })
+
+        // Anti-call
+        const antiCallNotified = new Set()
+        VoidMD.ev.on('call', async (calls) => {
+            if (!global.anticall) return
+            for (let call of calls) {
+                const caller = call.from
+                if (!caller) continue
                 try {
-                    fs.writeFileSync(OWNER_FILE, JSON.stringify({ owner: OWNER_NUMBER }));
+                    if (call.id) await VoidMD.rejectCall(call.id, caller).catch(() => {})
+                    if (!antiCallNotified.has(caller)) {
+                        antiCallNotified.add(caller)
+                        setTimeout(() => antiCallNotified.delete(caller), 60000)
+                        await VoidMD.sendMessage(caller, { text: '*📵 Anti-Call ON*\nCalls blocked.' })
+                    }
+                    setTimeout(() => VoidMD.updateBlockStatus(caller, 'block').catch(() => {}), 1000)
                 } catch {}
             }
-        });
+        })
 
-        // Anti-call handler - FIXED QUOTES
-        sock.ev.on('call', async (calls) => {
-            if (!global.anticall) return;
-            for (let call of calls) {
-                if (call.status === 'offer') {
-                    await sock.rejectCall(call.id, call.from);
-                    await sock.sendMessage(call.from, {
-                        text: '*Anti-Call is active*\n\nCalls are not allowed.'
-                    });
-                }
-            }
-        });
-
-        // Auto-view status
-        sock.ev.on('messages.upsert', async ({ messages }) => {
-            if (!global.autoviewstatus) return;
+        // Auto status
+        VoidMD.ev.on('messages.upsert', async ({ messages }) => {
             for (let msg of messages) {
-                if (msg.key.remoteJid === 'status@broadcast') {
+                if (msg.key.remoteJid === 'status@broadcast' && global.autoviewstatus) {
                     try {
-                        await sock.readMessages([msg.key]);
+                        await VoidMD.readMessages([msg.key])
                         if (global.autolikestatus) {
-                            await sock.sendMessage(msg.key.remoteJid, {
-                                react: { text: '💚', key: msg.key }
-                            });
+                            await VoidMD.sendMessage(msg.key.remoteJid, { react: { text: '💚', key: msg.key } })
                         }
                     } catch {}
                 }
             }
-        });
+        })
 
-        sock.ev.on('messages.upsert', async ({ messages, type }) => {
-            if (type!== 'notify') return;
-            const m = messages[0];
-            if (!m.message) return;
+        // Command handler
+        VoidMD.ev.on('messages.upsert', async ({ messages, type }) => {
+            if (type!== 'notify') return
+            const m = messages[0]
+            if (!m.message || m.key.fromMe) return
 
-            const botNumber = sock.user?.id?.replace(/[^0-9]/g, '');
-            let sender = m.key.participant || m.key.remoteJid;
-            const senderNum = sender.replace(/[^0-9]/g, '');
+            const msg = smsg(VoidMD, m)
+            store.saveMessage(msg.chat, msg.id, msg)
 
-            console.log('[OWNER CHECK] Sender:', senderNum, '| Owner:', OWNER_NUMBER, '| Bot:', botNumber);
+            const botNum = VoidMD.user?.id?.replace(/[^0-9]/g, '')
+            const senderNum = msg.sender.replace(/[^0-9]/g, '')
+            if (senderNum === botNum) return
 
-            if (senderNum === botNumber) return;
-
-            // Auto-read
-            if (global.autoread &&!m.key.fromMe && m.key.remoteJid!== 'status@broadcast') {
-                try {
-                    await sock.readMessages([m.key]);
-                } catch {}
+            if (global.autoread && msg.chat!== 'status@broadcast') {
+                try { await VoidMD.readMessages([msg.key]) } catch {}
             }
+            if (global.autotyping) try { await VoidMD.sendPresenceUpdate('composing', msg.chat) } catch {}
+            if (global.autorecording) try { await VoidMD.sendPresenceUpdate('recording', msg.chat) } catch {}
 
-            const body = m.message.conversation
-                || m.message.extendedTextMessage?.text
-                || m.message.imageMessage?.caption
-                || m.message.videoMessage?.caption
-                || '';
+            if (!msg.body.startsWith(global.prefix)) return
+            if (!global.public && senderNum!== OWNER_NUMBER) return
 
-            if (!body.startsWith(prefix)) return;
+            const args = msg.body.slice(global.prefix.length).trim().split(/ +/)
+            const cmdName = args.shift().toLowerCase()
+            const cmd = commands.get(cmdName) || [...commands.values()].find(c => c.alias?.includes(cmdName))
+            if (!cmd) return
 
-            // Private mode check
-            if (!global.public && senderNum!== OWNER_NUMBER) {
-                console.log('[BLOCKED] Private mode - non-owner');
-                return;
-            }
-
-            const args = body.slice(prefix.length).trim().split(/ +/);
-            const cmdName = args.shift().toLowerCase();
-
-            const command = commands.get(cmdName) || [...commands.values()].find(c => c.alias?.includes(cmdName));
-            if (!command) return;
+            console.log(`[CMD] ${cmdName} from ${senderNum}`)
 
             try {
-                await sock.sendMessage(m.key.remoteJid, {
-                    react: { text: command.react || '⚡', key: m.key }
-                }).catch(() => {});
-
-                await command.execute(m, {
-                    VoidMD: sock,
+                await VoidMD.sendMessage(msg.chat, { react: { text: cmd.react || '⚡', key: msg.key } }).catch(() => {})
+                await cmd.execute(msg, {
+                    VoidMD,
                     commands,
                     args,
-                    prefix,
+                    prefix: global.prefix,
                     owner: OWNER_NUMBER,
-                    sender: sender
-                });
+                    sender: msg.sender,
+                    senderNum
+                })
             } catch (e) {
-                console.log(`[CMD ERROR] ${cmdName}:`, e.message);
-                await sock.sendMessage(m.key.remoteJid, {
-                    text: `Error: ${e.message}`
-                }, { quoted: m }).catch(() => {});
+                console.log(`[ERROR] ${cmdName}:`, e.message)
+                await VoidMD.sendMessage(msg.chat, { text: `*Error*\n${e.message}` }, { quoted: msg }).catch(() => {})
             }
-        });
+        })
 
     } catch (error) {
-        console.log('[BOT CRASH]', error.message);
-        botStatus = 'Crashed: ' + error.message;
-        setTimeout(startBot, 10000);
+        console.log('[CRASH]', error.message)
+        botStatus = 'Crashed'
+        setTimeout(startBot, 10000)
     }
 }
 
-startBot();
+startBot()
+
+process.on('uncaughtException', console.error)
+process.on('unhandledRejection', console.error)
