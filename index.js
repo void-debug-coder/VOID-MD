@@ -124,18 +124,108 @@ async function startBot() {
                 latestQR = null;
                 console.log('[READY] Connected. Owner:', OWNER_NUMBER);
                 
-                // Save owner to file for reference, but don't rely on it
                 try {
                     fs.writeFileSync(OWNER_FILE, JSON.stringify({ owner: OWNER_NUMBER }));
                 } catch {}
             }
         });
 
-        // Anti-call handler
+        // Anti-call handler - FIXED QUOTES
         sock.ev.on('call', async (calls) => {
             if (!global.anticall) return;
             for (let call of calls) {
                 if (call.status === 'offer') {
                     await sock.rejectCall(call.id, call.from);
                     await sock.sendMessage(call.from, {
-                        text: '📞 *Anti-Call is active*\n\nCalls are not allowed
+                        text: '*Anti-Call is active*\n\nCalls are not allowed.'
+                    });
+                }
+            }
+        });
+
+        // Auto-view status
+        sock.ev.on('messages.upsert', async ({ messages }) => {
+            if (!global.autoviewstatus) return;
+            for (let msg of messages) {
+                if (msg.key.remoteJid === 'status@broadcast') {
+                    try {
+                        await sock.readMessages([msg.key]);
+                        if (global.autolikestatus) {
+                            await sock.sendMessage(msg.key.remoteJid, {
+                                react: { text: '💚', key: msg.key }
+                            });
+                        }
+                    } catch {}
+                }
+            }
+        });
+
+        sock.ev.on('messages.upsert', async ({ messages, type }) => {
+            if (type!== 'notify') return;
+            const m = messages[0];
+            if (!m.message) return;
+
+            const botNumber = sock.user?.id?.replace(/[^0-9]/g, '');
+            let sender = m.key.participant || m.key.remoteJid;
+            const senderNum = sender.replace(/[^0-9]/g, '');
+
+            console.log('[OWNER CHECK] Sender:', senderNum, '| Owner:', OWNER_NUMBER, '| Bot:', botNumber);
+
+            if (senderNum === botNumber) return;
+
+            // Auto-read
+            if (global.autoread &&!m.key.fromMe && m.key.remoteJid!== 'status@broadcast') {
+                try {
+                    await sock.readMessages([m.key]);
+                } catch {}
+            }
+
+            const body = m.message.conversation
+                || m.message.extendedTextMessage?.text
+                || m.message.imageMessage?.caption
+                || m.message.videoMessage?.caption
+                || '';
+
+            if (!body.startsWith(prefix)) return;
+
+            // Private mode check
+            if (!global.public && senderNum!== OWNER_NUMBER) {
+                console.log('[BLOCKED] Private mode - non-owner');
+                return;
+            }
+
+            const args = body.slice(prefix.length).trim().split(/ +/);
+            const cmdName = args.shift().toLowerCase();
+
+            const command = commands.get(cmdName) || [...commands.values()].find(c => c.alias?.includes(cmdName));
+            if (!command) return;
+
+            try {
+                await sock.sendMessage(m.key.remoteJid, {
+                    react: { text: command.react || '⚡', key: m.key }
+                }).catch(() => {});
+
+                await command.execute(m, {
+                    VoidMD: sock,
+                    commands,
+                    args,
+                    prefix,
+                    owner: OWNER_NUMBER,
+                    sender: sender
+                });
+            } catch (e) {
+                console.log(`[CMD ERROR] ${cmdName}:`, e.message);
+                await sock.sendMessage(m.key.remoteJid, {
+                    text: `Error: ${e.message}`
+                }, { quoted: m }).catch(() => {});
+            }
+        });
+
+    } catch (error) {
+        console.log('[BOT CRASH]', error.message);
+        botStatus = 'Crashed: ' + error.message;
+        setTimeout(startBot, 10000);
+    }
+}
+
+startBot();
