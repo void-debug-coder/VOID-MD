@@ -1,25 +1,15 @@
 {
   "name": "void-md",
-  "version": "3.0.0",
-  "description": "VOID-MD Advanced WhatsApp Bot",
+  "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "pair": "node index.js --pairing-code"
-  },
-  "engines": {
-    "node": ">=18.0.0"
+    "start": "node index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.6.0",
-    "@hapi/boom": "^10.0.1",
-    "axios": "^1.6.2",
-    "chalk": "^4.1.2",
-    "express": "^4.18.2",
-    "node-cache": "^5.1.2",
-    "pino": "^8.17.2",
+    "@whiskeysockets/baileys": "latest",
     "qrcode": "^1.5.3",
-    "awesome-phonenumber": "^6.5.0",
-    "libphonenumber-js": "^1.11.4"
+    "pino": "^8.0.0",
+    "node-cache": "^5.1.2",
+    "express": "^4.18.2"
   }
 }
