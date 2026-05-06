@@ -72,26 +72,32 @@ global.autorecording = false
 global.alwaysonline = false
 global.public = true
 
-// Load commands recursively
+// Load commands recursively from ./plugins
 const loadCommands = (dir) => {
+    if (!fs.existsSync(dir)) {
+        console.log(chalk.yellow(`[WARN] Plugins folder '${dir}' not found. Creating...`))
+        fs.mkdirSync(dir, { recursive: true })
+        return
+    }
     fs.readdirSync(dir).forEach(file => {
         const filePath = path.join(dir, file)
         if (fs.statSync(filePath).isDirectory()) {
             loadCommands(filePath)
         } else if (file.endsWith('.js')) {
             try {
+                delete require.cache[require.resolve(filePath)] // Hot reload fix
                 const command = require(filePath)
                 if (command.name) {
                     commands.set(command.name, command)
-                    console.log(`[CMD] ${command.name}`)
+                    console.log(`[CMD] Loaded: ${command.name}`)
                 }
             } catch (e) {
-                console.log(`[CMD ERROR] ${file}:`, e.message)
+                console.log(chalk.red(`[CMD ERROR] ${file}:`), e.message)
             }
         }
     })
 }
-if (fs.existsSync('./commands')) loadCommands('./commands')
+loadCommands('./plugins')
 
 // Keep alive
 app.get('/ping', (req, res) => res.send('Alive'))
@@ -112,7 +118,7 @@ app.get('/', async (req, res) => {
     }
 })
 
-app.listen(PORT, () => console.log(`[SERVER] Port ${PORT}`))
+app.listen(PORT, () => console.log(chalk.green(`[SERVER] Port ${PORT}`)))
 
 // Pairing code setup
 const pairingCode = process.argv.includes("--pairing-code")
@@ -121,7 +127,7 @@ const question = (text) => rl? new Promise(r => rl.question(text, r)) : Promise.
 
 async function startBot() {
     try {
-        console.log(`[BOT] Starting ${global.botname}...`)
+        console.log(chalk.cyan(`[BOT] Starting ${global.botname}...`))
         if (!fs.existsSync('./session')) fs.mkdirSync('./session')
         if (!fs.existsSync('./data')) fs.mkdirSync('./data')
 
@@ -212,7 +218,7 @@ async function startBot() {
                 // Startup msg
                 const botJid = VoidMD.user.id.split(':')[0] + '@s.whatsapp.net'
                 await VoidMD.sendMessage(botJid, {
-                    text: `*${global.themeemoji} ${global.botname} ACTIVE*\n\n*Time:* ${new Date().toLocaleString()}\n*RAM:* ${(process.memoryUsage().rss/1024/1024).toFixed(2)}MB\n*Mode:* ${global.public? 'Public':'Private'}\n*Prefix:* ${global.prefix}\n\n*Update:* ${settings.channels.update}`
+                    text: `*${global.themeemoji} ${global.botname} ACTIVE*\n\n*Time:* ${new Date().toLocaleString()}\n*RAM:* ${(process.memoryUsage().rss/1024/1024).toFixed(2)}MB\n*Mode:* ${global.public? 'Public':'Private'}\n*Prefix:* ${global.prefix}\n*Commands:* ${commands.size}\n\n*Update:* ${settings.channels.update}`
                 })
 
                 console.log(chalk.cyan(`< ========== ${global.botname} ${settings.version} ========== >`))
@@ -271,15 +277,16 @@ async function startBot() {
             if (global.autotyping) try { await VoidMD.sendPresenceUpdate('composing', msg.chat) } catch {}
             if (global.autorecording) try { await VoidMD.sendPresenceUpdate('recording', msg.chat) } catch {}
 
-            if (!msg.body.startsWith(global.prefix)) return
+            if (!msg.body || !msg.body.startsWith(global.prefix)) return
             if (!global.public && senderNum!== OWNER_NUMBER) return
 
             const args = msg.body.slice(global.prefix.length).trim().split(/ +/)
             const cmdName = args.shift().toLowerCase()
+            const text = args.join(' ')
             const cmd = commands.get(cmdName) || [...commands.values()].find(c => c.alias?.includes(cmdName))
             if (!cmd) return
 
-            console.log(`[CMD] ${cmdName} from ${senderNum}`)
+            console.log(chalk.magenta(`[CMD] ${cmdName} from ${senderNum}`))
 
             try {
                 await VoidMD.sendMessage(msg.chat, { react: { text: cmd.react || '⚡', key: msg.key } }).catch(() => {})
@@ -287,19 +294,24 @@ async function startBot() {
                     VoidMD,
                     commands,
                     args,
+                    text,
                     prefix: global.prefix,
                     owner: OWNER_NUMBER,
                     sender: msg.sender,
-                    senderNum
+                    senderNum,
+                    isGroup: msg.isGroup,
+                    isAdmin: msg.isAdmin,
+                    isBotAdmin: msg.isBotAdmin,
+                    isOwner: senderNum === OWNER_NUMBER
                 })
             } catch (e) {
-                console.log(`[ERROR] ${cmdName}:`, e.message)
-                await VoidMD.sendMessage(msg.chat, { text: `*Error*\n${e.message}` }, { quoted: msg }).catch(() => {})
+                console.log(chalk.red(`[ERROR] ${cmdName}:`), e.message)
+                await VoidMD.sendMessage(msg.chat, { text: `*Error* ${global.themeemoji}\n${e.message}` }, { quoted: msg }).catch(() => {})
             }
         })
 
     } catch (error) {
-        console.log('[CRASH]', error.message)
+        console.log(chalk.red('[CRASH]'), error.message)
         botStatus = 'Crashed'
         setTimeout(startBot, 10000)
     }
