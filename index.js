@@ -17,27 +17,27 @@ global.themeemoji = settings.themeEmoji
 global.owner = settings.ownerNumber
 global.prefix = settings.prefix
 
-// Load plugins
+// Load plugins safely
 const loadCommands = (dir) => {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir)
     for (const file of fs.readdirSync(dir)) {
         const filePath = path.join(dir, file)
         if (file.endsWith('.js')) {
             try {
+                delete require.cache[require.resolve(filePath)]
                 const cmd = require(filePath)
                 if (cmd.name) {
                     commands.set(cmd.name, cmd)
                     console.log(`[CMD] Loaded: ${cmd.name}`)
                 }
             } catch (e) {
-                console.log(`[ERROR] ${file}:`, e.message)
+                console.log(`[CMD ERROR] ${file}:`, e.message)
             }
         }
     }
 }
 loadCommands('./plugins')
 
-// Web server
 app.get('/', async (req, res) => {
     if (latestQR) {
         res.send(`<body style="background:#000;text-align:center;padding-top:10vh;"><img src="${latestQR}" style="width:300px;"><h2 style="color:#fff;">Scan QR</h2></body>`)
