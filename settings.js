@@ -11,7 +11,7 @@ module.exports = {
         '120363299165217795@newsletter'
     ],
     channels: {
-        update: 'https://whatsapp.com/channel/0029VaN2eQQ59PwNixDnvD16',
-        support: 'https://chat.whatsapp.com/BVozeag4Zva67eoct2qWdI'
+        update: 'https://whatsapp.com/channel/0029VbCUCkkAInPkhAPNil1h',
+        support: 'https://chat.whatsapp.com/F0VqKkKJU2DEo2MbIrCqBV'
     }
 }
