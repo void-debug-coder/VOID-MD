@@ -17,7 +17,6 @@ global.themeemoji = settings.themeEmoji
 global.owner = settings.ownerNumber
 global.prefix = settings.prefix
 
-// Safe plugin loader - won't crash on bad files
 const loadCommands = (dir) => {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir)
     for (const file of fs.readdirSync(dir)) {
