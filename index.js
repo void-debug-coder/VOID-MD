@@ -18,7 +18,7 @@ global.owner = settings.ownerNumber
 global.prefix = settings.prefix
 
 const loadCommands = (dir) => {
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir)
+    if (!fs.existsSync(dir)) return
     for (const file of fs.readdirSync(dir)) {
         const filePath = path.join(dir, file)
         if (file.endsWith('.js')) {
@@ -90,20 +90,16 @@ async function startBot() {
     VoidMD.ev.on('messages.upsert', async ({ messages }) => {
         const m = messages[0]
         if (!m.message || m.key.fromMe) return
-
         const msg = smsg(VoidMD, m)
         const body = msg.text
         if (!body.startsWith(global.prefix)) return
-
         const args = body.slice(global.prefix.length).trim().split(/ +/)
         const cmdName = args.shift().toLowerCase()
-        const text = args.join(' ')
         const cmd = commands.get(cmdName) || [...commands.values()].find(c => c.alias?.includes(cmdName))
         if (!cmd) return
-
         console.log(`[CMD] ${cmdName}`)
         try {
-            await cmd.execute(msg, { VoidMD, args, text })
+            await cmd.execute(msg, { VoidMD, args })
         } catch (e) {
             console.log(`[ERROR] ${cmdName}:`, e.message)
         }
