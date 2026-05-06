@@ -1,52 +1,57 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, jidDecode } = require("@whiskeysockets/baileys")
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require("@whiskeysockets/baileys")
 const pino = require("pino")
 const fs = require('fs')
 const path = require('path')
 const express = require('express')
 const qrcode = require('qrcode')
-const { smsg } = require('./lib/functions')
-const settings = require('./settings')
+
+// CONFIG - EDIT HERE
+const config = {
+    botName: 'VOID-MD',
+    owner: '254112843071', // your number
+    prefix: '.',
+    themeEmoji: '💀'
+}
 
 const app = express()
 const PORT = process.env.PORT || 10000
 const commands = new Map()
 let latestQR = null
 
-global.botname = settings.botName
-global.themeemoji = settings.themeEmoji
-global.owner = settings.ownerNumber
-global.prefix = settings.prefix
+// SIMPLE MESSAGE PARSER - NO MORE LIB/
+const parseMsg = (VoidMD, m) => {
+    if (!m) return m
+    m.isGroup = m.key.remoteJid.endsWith('@g.us')
+    m.from = m.key.remoteJid
+    m.sender = m.key.participant || m.key.remoteJid
+    m.text = m.message?.conversation || m.message?.extendedTextMessage?.text || m.message?.imageMessage?.caption || m.message?.videoMessage?.caption || ''
+    m.reply = (text) => VoidMD.sendMessage(m.from, { text }, { quoted: m })
+    return m
+}
 
-// Load from commands folder using absolute path
-const loadCommands = (dir) => {
-    const cmdPath = path.join(__dirname, dir)
-    if (!fs.existsSync(cmdPath)) {
-        console.log('[CMD] commands folder missing')
-        return
-    }
+// LOAD COMMANDS
+const cmdPath = path.join(__dirname, 'commands')
+if (fs.existsSync(cmdPath)) {
     const files = fs.readdirSync(cmdPath).filter(f => f.endsWith('.js'))
-    console.log('Files in commands:', files)
+    console.log('Loading commands:', files)
     for (const file of files) {
-        const filePath = path.join(cmdPath, file)
         try {
-            delete require.cache[require.resolve(filePath)]
-            const cmd = require(filePath)
-            if (cmd?.name) {
+            const cmd = require(path.join(cmdPath, file))
+            if (cmd.name) {
                 commands.set(cmd.name, cmd)
-                console.log(`[CMD] Loaded: ${cmd.name}`)
+                console.log(`[LOADED] ${cmd.name}`)
             }
         } catch (e) {
-            console.log(`[CMD ERROR] ${file}:`, e.message)
+            console.log(`[ERROR] ${file}:`, e.message)
         }
     }
 }
-loadCommands('./commands')
 
 app.get('/', async (req, res) => {
     if (latestQR) {
-        res.send(`<body style="background:#000;text-align:center;padding-top:10vh;"><img src="${latestQR}" style="width:300px;"><h2 style="color:#fff;">Scan QR</h2></body>`)
+        res.send(`<body style="background:#000;text-align:center;padding-top:10vh;"><img src="${latestQR}" style="width:300px;"><h2 style="color:#fff;">${config.botName}</h2></body>`)
     } else {
-        res.send(`<body style="background:#000;color:#0f0;text-align:center;padding-top:20vh;"><h1>${global.botname} Online</h1><p>Commands: ${commands.size}</p></body>`)
+        res.send(`<body style="background:#000;color:#0f0;text-align:center;padding-top:20vh;"><h1>${config.botName} Online</h1><p>Commands: ${commands.size}</p></body>`)
     }
 })
 app.listen(PORT, () => console.log(`Server: ${PORT}`))
@@ -59,17 +64,9 @@ async function startBot() {
         version,
         logger: pino({ level: 'silent' }),
         printQRInTerminal: false,
-        browser: [global.botname, "Chrome", "1.0.0"],
+        browser: [config.botName, "Chrome", "1.0.0"],
         auth: state
     })
-
-    VoidMD.decodeJid = (jid) => {
-        if (!jid) return jid
-        if (/:\d+@/gi.test(jid)) {
-            const decode = jidDecode(jid) || {}
-            return decode.user && decode.server && decode.user + '@' + decode.server || jid
-        } else return jid
-    }
 
     VoidMD.ev.on('creds.update', saveCreds)
 
@@ -93,32 +90,30 @@ async function startBot() {
     })
 
     VoidMD.ev.on('messages.upsert', async ({ messages }) => {
-        const m = messages[0]
-        if (!m.message || m.key.fromMe) return
-
-        const msg = smsg(VoidMD, m)
-        const body = msg.text || ''
-        if (!body.startsWith(global.prefix)) return
-
-        const args = body.slice(global.prefix.length).trim().split(/ +/)
-        const cmdName = args.shift().toLowerCase()
-        const text = args.join(' ')
-        const cmd = commands.get(cmdName) || [...commands.values()].find(c => c.alias?.includes(cmdName))
-
-        if (!cmd) return
-
-        console.log(`[CMD] ${cmdName}`)
         try {
-            await cmd.execute(msg, { VoidMD, args, text, prefix: global.prefix, commands })
+            const m = messages[0]
+            if (!m.message || m.key.fromMe) return
+
+            const msg = parseMsg(VoidMD, m)
+            if (!msg.text.startsWith(config.prefix)) return
+
+            const args = msg.text.slice(config.prefix.length).trim().split(/ +/)
+            const cmdName = args.shift().toLowerCase()
+            const cmd = commands.get(cmdName) || [...commands.values()].find(c => c.alias?.includes(cmdName))
+
+            if (!cmd) return
+
+            console.log(`[CMD] ${cmdName} from ${msg.sender}`)
+            await cmd.execute(msg, { VoidMD, args, config, commands })
         } catch (e) {
-            console.log(`[ERROR] ${cmdName}:`, e.message)
+            console.log(`[CRASH]`, e.message)
         }
     })
 }
 
 startBot()
 
-// Keep Render alive
+// Keep alive
 setInterval(() => {
     if (process.env.RENDER_EXTERNAL_URL) {
         require('https').get(process.env.RENDER_EXTERNAL_URL).on('error', () => {})
