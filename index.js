@@ -17,33 +17,30 @@ global.themeemoji = settings.themeEmoji
 global.owner = settings.ownerNumber
 global.prefix = settings.prefix
 
-// Safe plugin loader - no manual require
+// Load from commands folder using absolute path
 const loadCommands = (dir) => {
-    if (!fs.existsSync(dir)) {
-        console.log('[CMD] plugins folder missing')
+    const cmdPath = path.join(__dirname, dir)
+    if (!fs.existsSync(cmdPath)) {
+        console.log('[CMD] commands folder missing')
         return
     }
-    const files = fs.readdirSync(dir)
-    console.log('Files in plugins:', files)
+    const files = fs.readdirSync(cmdPath).filter(f => f.endsWith('.js'))
+    console.log('Files in commands:', files)
     for (const file of files) {
-        const filePath = path.join(dir, file)
-        if (file.endsWith('.js')) {
-            try {
-                delete require.cache[require.resolve(filePath)]
-                const cmd = require(filePath)
-                if (cmd.name) {
-                    commands.set(cmd.name, cmd)
-                    console.log(`[CMD] Loaded: ${cmd.name}`)
-                } else {
-                    console.log(`[CMD ERROR] ${file}: missing module.exports.name`)
-                }
-            } catch (e) {
-                console.log(`[CMD ERROR] ${file}:`, e.message)
+        const filePath = path.join(cmdPath, file)
+        try {
+            delete require.cache[require.resolve(filePath)]
+            const cmd = require(filePath)
+            if (cmd?.name) {
+                commands.set(cmd.name, cmd)
+                console.log(`[CMD] Loaded: ${cmd.name}`)
             }
+        } catch (e) {
+            console.log(`[CMD ERROR] ${file}:`, e.message)
         }
     }
 }
-loadCommands('./plugins')
+loadCommands('./commands')
 
 app.get('/', async (req, res) => {
     if (latestQR) {
