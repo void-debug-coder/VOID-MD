@@ -8,7 +8,7 @@ const { smsg } = require('./lib/functions')
 const settings = require('./settings')
 
 const app = express()
-const PORT = process.env.PORT || 3000
+const PORT = process.env.PORT || 10000
 const commands = new Map()
 let latestQR = null
 
@@ -17,9 +17,15 @@ global.themeemoji = settings.themeEmoji
 global.owner = settings.ownerNumber
 global.prefix = settings.prefix
 
+// Safe plugin loader - no manual require
 const loadCommands = (dir) => {
-    if (!fs.existsSync(dir)) return
-    for (const file of fs.readdirSync(dir)) {
+    if (!fs.existsSync(dir)) {
+        console.log('[CMD] plugins folder missing')
+        return
+    }
+    const files = fs.readdirSync(dir)
+    console.log('Files in plugins:', files)
+    for (const file of files) {
         const filePath = path.join(dir, file)
         if (file.endsWith('.js')) {
             try {
@@ -28,6 +34,8 @@ const loadCommands = (dir) => {
                 if (cmd.name) {
                     commands.set(cmd.name, cmd)
                     console.log(`[CMD] Loaded: ${cmd.name}`)
+                } else {
+                    console.log(`[CMD ERROR] ${file}: missing module.exports.name`)
                 }
             } catch (e) {
                 console.log(`[CMD ERROR] ${file}:`, e.message)
@@ -90,16 +98,21 @@ async function startBot() {
     VoidMD.ev.on('messages.upsert', async ({ messages }) => {
         const m = messages[0]
         if (!m.message || m.key.fromMe) return
+
         const msg = smsg(VoidMD, m)
-        const body = msg.text
+        const body = msg.text || ''
         if (!body.startsWith(global.prefix)) return
+
         const args = body.slice(global.prefix.length).trim().split(/ +/)
         const cmdName = args.shift().toLowerCase()
+        const text = args.join(' ')
         const cmd = commands.get(cmdName) || [...commands.values()].find(c => c.alias?.includes(cmdName))
+
         if (!cmd) return
+
         console.log(`[CMD] ${cmdName}`)
         try {
-            await cmd.execute(msg, { VoidMD, args })
+            await cmd.execute(msg, { VoidMD, args, text, prefix: global.prefix, commands })
         } catch (e) {
             console.log(`[ERROR] ${cmdName}:`, e.message)
         }
@@ -107,3 +120,10 @@ async function startBot() {
 }
 
 startBot()
+
+// Keep Render alive
+setInterval(() => {
+    if (process.env.RENDER_EXTERNAL_URL) {
+        require('https').get(process.env.RENDER_EXTERNAL_URL).on('error', () => {})
+    }
+}, 240000)
