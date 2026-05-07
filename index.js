@@ -5,27 +5,32 @@ const path = require('path')
 const express = require('express')
 const qrcode = require('qrcode')
 
-// CONFIG - EDIT HERE
+// === CONFIG - EDIT HERE ===
 const config = {
     botName: 'VOID-MD',
-    owner: '254112843071', // your number
+    owner: '254712345678', // Your number with country code, no +
     prefix: '.',
     themeEmoji: '💀'
 }
+// =========================
 
 const app = express()
 const PORT = process.env.PORT || 10000
 const commands = new Map()
 let latestQR = null
 
-// SIMPLE MESSAGE PARSER - NO MORE LIB/
+// SIMPLE MESSAGE PARSER
 const parseMsg = (VoidMD, m) => {
     if (!m) return m
     m.isGroup = m.key.remoteJid.endsWith('@g.us')
     m.from = m.key.remoteJid
     m.sender = m.key.participant || m.key.remoteJid
-    m.text = m.message?.conversation || m.message?.extendedTextMessage?.text || m.message?.imageMessage?.caption || m.message?.videoMessage?.caption || ''
+    m.text = m.message?.conversation ||
+             m.message?.extendedTextMessage?.text ||
+             m.message?.imageMessage?.caption ||
+             m.message?.videoMessage?.caption || ''
     m.reply = (text) => VoidMD.sendMessage(m.from, { text }, { quoted: m })
+    m.react = (emoji) => VoidMD.sendMessage(m.from, { react: { text: emoji, key: m.key } })
     return m
 }
 
@@ -45,17 +50,21 @@ if (fs.existsSync(cmdPath)) {
             console.log(`[ERROR] ${file}:`, e.message)
         }
     }
+} else {
+    console.log('[WARN] commands folder missing')
 }
 
+// WEB SERVER FOR QR
 app.get('/', async (req, res) => {
     if (latestQR) {
-        res.send(`<body style="background:#000;text-align:center;padding-top:10vh;"><img src="${latestQR}" style="width:300px;"><h2 style="color:#fff;">${config.botName}</h2></body>`)
+        res.send(`<body style="background:#111;text-align:center;padding-top:10vh;font-family:sans-serif;"><img src="${latestQR}" style="width:300px;border:4px solid #0f0;"><h2 style="color:#fff;">${config.botName}</h2><p style="color:#888;">Scan with WhatsApp > Linked Devices</p></body>`)
     } else {
-        res.send(`<body style="background:#000;color:#0f0;text-align:center;padding-top:20vh;"><h1>${config.botName} Online</h1><p>Commands: ${commands.size}</p></body>`)
+        res.send(`<body style="background:#111;color:#0f0;text-align:center;padding-top:20vh;font-family:sans-serif;"><h1>${config.botName} Online ${config.themeEmoji}</h1><p>Commands Loaded: ${commands.size}</p><p>Prefix: ${config.prefix}</p></body>`)
     }
 })
 app.listen(PORT, () => console.log(`Server: ${PORT}`))
 
+// START BOT
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('./session')
     const { version } = await fetchLatestBaileysVersion()
@@ -65,7 +74,8 @@ async function startBot() {
         logger: pino({ level: 'silent' }),
         printQRInTerminal: false,
         browser: [config.botName, "Chrome", "1.0.0"],
-        auth: state
+        auth: state,
+        getMessage: async () => ({}) // Prevents crash on deleted messages
     })
 
     VoidMD.ev.on('creds.update', saveCreds)
@@ -74,11 +84,13 @@ async function startBot() {
         const { connection, lastDisconnect, qr } = update
         if (qr) {
             latestQR = await qrcode.toDataURL(qr)
-            console.log('QR ready')
+            console.log('QR ready - scan at your Render URL')
         }
         if (connection === 'close') {
             const code = lastDisconnect?.error?.output?.statusCode
+            console.log('Connection closed:', code)
             if (code === DisconnectReason.loggedOut) {
+                console.log('Logged out. Deleting session...')
                 fs.rmSync('./session', { recursive: true, force: true })
             }
             setTimeout(startBot, 3000)
@@ -89,9 +101,10 @@ async function startBot() {
         }
     })
 
-    VoidMD.ev.on('messages.upsert', async ({ messages }) => {
+    VoidMD.ev.on('messages.upsert', async (chatUpdate) => {
         try {
-            const m = messages[0]
+            if (chatUpdate.type!== 'notify') return
+            const m = chatUpdate.messages[0]
             if (!m.message || m.key.fromMe) return
 
             const msg = parseMsg(VoidMD, m)
@@ -113,7 +126,7 @@ async function startBot() {
 
 startBot()
 
-// Keep alive
+// KEEP RENDER ALIVE
 setInterval(() => {
     if (process.env.RENDER_EXTERNAL_URL) {
         require('https').get(process.env.RENDER_EXTERNAL_URL).on('error', () => {})
